@@ -145,6 +145,50 @@ class FixtureRulesTest(unittest.TestCase):
             self.assertIn("orders/api.ts:2 [http] fetch-write createOrder()", out)
             self.assertIn("applied 1 gate(s) to 1 file(s).", out)
 
+    @unittest.skipUnless(HAVE_EXTRA, "polyglot extra not installed")
+    def test_exec_kind_generic_function_does_not_crash(self):
+        """Regression for KeyError: 'exec' when a child_process call is in a
+        generically-named function (run/execute/handle/do) and verb inference
+        falls back to the kind's default action."""
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td) / "repo"
+            root.mkdir()
+            (root / "exec.ts").write_text(
+                'import { exec } from "node:child_process";\n'
+                'export function run() {\n'
+                '  exec("ls");\n'
+                '}\n')
+            policy = pathlib.Path(td) / "policy.json"
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = cli.scan_cmd(_args(root, policy))
+            out = buf.getvalue()
+            verbs = __import__("json").loads(policy.read_text())
+        self.assertEqual(code, 0)
+        self.assertIn("ts/js files scanned: 1  skipped: 0", out)
+        self.assertIn("[exec] child-process run()", out)
+        self.assertEqual(verbs.get("exec.execute"), "require_grant")
+
+    @unittest.skipUnless(HAVE_EXTRA, "polyglot extra not installed")
+    def test_exec_kind_json_mode_does_not_crash(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td) / "repo"
+            root.mkdir()
+            (root / "exec.ts").write_text(
+                'import { exec } from "node:child_process";\n'
+                'export function run() {\n'
+                '  exec("ls");\n'
+                '}\n')
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = cli.scan_cmd(_args(root, pathlib.Path(td) / "policy.json",
+                                           format="json"))
+            out = buf.getvalue()
+        self.assertEqual(code, 0)
+        doc = __import__("json").loads(out)
+        self.assertEqual(doc["findings"][0]["kind"], "exec")
+        self.assertEqual(doc["findings"][0]["verb"], "exec.execute")
+
 
 class FileWalkTest(unittest.TestCase):
     """File collection is stdlib-only, so these run with or without the extra."""
