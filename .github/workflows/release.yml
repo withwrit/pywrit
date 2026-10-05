@@ -196,3 +196,26 @@ jobs:
         run: |
           mcp-publisher login github-oidc
           mcp-publisher publish server.json
+
+  github-release:
+    # Create the GitHub Release object for the tag. The repo's /releases page
+    # (and the marketing site's Changelog link) reads from these objects; the
+    # rest of this workflow only pushes tags and publishes packages, which is
+    # why the releases page sat empty through v0.2.8. Notes are generated
+    # from the merged PRs since the previous tag. Idempotent: a re-run skips
+    # a release that already exists. Depends only on the main release job so
+    # a failure in the registry or Smithery jobs cannot block it.
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "GitHub Release $GITHUB_REF_NAME already exists; skipping"
+            exit 0
+          fi
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$GITHUB_REF_NAME"
