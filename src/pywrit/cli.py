@@ -230,12 +230,14 @@ _GENERIC_PREFIXES = {"issue", "process", "handle", "do", "run", "perform",
 _KIND_FALLBACK_ACTION = {"db": "write", "http": "call", "file": "write",
                          "email": "send", "queue": "publish", "aws": "write",
                          "payments": "charge", "sms": "send", "shell": "execute",
+                         "exec": "execute",
                          "k8s": "deploy", "github": "create", "push": "send",
                          "crypto": "send", "docker": "run", "ftp": "upload",
                          "alert": "send"}
 _KIND_TIER = {"db": "medium", "http": "medium", "file": "low",
               "email": "medium", "queue": "medium", "aws": "high",
               "payments": "high", "sms": "medium", "shell": "high",
+              "exec": "high",
               "k8s": "high", "github": "medium", "push": "medium",
               "crypto": "high", "docker": "high", "ftp": "low",
               "alert": "medium"}
@@ -525,14 +527,15 @@ class _ScanVisitor(_ast.NodeVisitor):
 
 def _infer_action(func_name, kind):
     tokens = [t for t in func_name.lower().split("_") if t]
+    fallback = _KIND_FALLBACK_ACTION.get(kind, "execute")
     if not tokens:
-        return _KIND_FALLBACK_ACTION[kind]
+        return fallback
     first = tokens[0]
     if first in _GENERIC_PREFIXES:
         if len(tokens) > 1:
             second = tokens[1]
             return _ACTION_SYNONYMS.get(second, second)
-        return _KIND_FALLBACK_ACTION[kind]
+        return fallback
     return _ACTION_SYNONYMS.get(first, first)
 
 
