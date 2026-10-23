@@ -155,6 +155,13 @@ job summary. The check fails when an ungated finding meets your
 No API key needed. Full reference: [docs/github-action.md](docs/github-action.md) ·
 example workflow: [examples/github-action/writ-scan.yml](examples/github-action/writ-scan.yml)
 
+## GitHub App
+
+Install the [Writ GitHub App](https://docs.withwrit.com/git-hub-app) on selected
+repositories: every push and pull request is scanned for ungated write-sites,
+with results as a check run on the PR and in the
+[portal](https://app.withwrit.com), where you manage policy, keys, and the audit log.
+
 ## MCP server (`writ-mcp`)
 
 Give any MCP-compatible agent point-of-action policy checks. `writ-mcp` is a
