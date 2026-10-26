@@ -113,15 +113,16 @@ class FixtureRulesTest(unittest.TestCase):
             verbs = __import__("json").loads(policy.read_text())
         self.assertEqual(code, 0)
         n = len(_expected())
-        self.assertIn("ts/js files scanned: 7  skipped: 0  (scan only, no --apply)", out)
-        self.assertIn("ts/js write sites: %d in 11 function(s)" % n, out)
+        self.assertIn("ts/js files scanned: 9  skipped: 0  (scan only, no --apply)", out)
+        self.assertIn("ts/js write sites: %d in 18 function(s)" % n, out)
         self.assertIn("ts/js gated: 1/%d" % n, out)  # gated.ts calls writCheck
         self.assertIn("    payments/refunds.service.ts:10 [sdk] stripe-write "
                       "issueRefund(): stripe.refunds.create({ charge: chargeId })", out)
         self.assertIn("    http.ts:10 [http] fetch-write createOrder(): fetch(url, "
                       "{ method: \"POST\", body: JSON.stringify(body) })", out)
         for v in ("payments.refund", "payments.record", "payments.export",
-                  "storage.save", "storage.create", "http.create", "legacy.write"):
+                  "storage.save", "storage.create", "http.create", "legacy.write",
+                  "rest.create", "rest.update", "rest.delete"):
             self.assertEqual(verbs.get(v), "require_grant", v)
         self.assertIn("nothing to instrument (ts/js findings are scan-only", out)
 
@@ -236,6 +237,68 @@ class FileWalkTest(unittest.TestCase):
             got = [str(p.relative_to(root))
                    for p in cli._tsjs_collect_files(root, [])]
         self.assertEqual(got, ["src/a.ts"])
+
+
+class ResourceWriteTest(unittest.TestCase):
+    """Regression for generated REST resource clients (twilio-style): the
+    fixture has a version request pipeline plus a resource class and a
+    factory-pattern list whose create/update/patch/remove methods route
+    requests with an explicit write HTTP method. Only those methods are
+    findings; fetch/list/get reads (even through pipeline calls) are not."""
+
+    EXPECTED = {
+        ("rest/account.ts", 52, "resource-write"),  # update()
+        ("rest/account.ts", 56, "resource-write"),  # updateWithHttpInfo()
+        ("rest/account.ts", 60, "resource-write"),  # remove() via Version.fetch
+        ("rest/account.ts", 64, "resource-write"),  # removeWithHttpInfo()
+        ("rest/account.ts", 68, "resource-write"),  # patch()
+        ("rest/message.ts", 14, "resource-write"),  # factory create()
+        ("rest/message.ts", 18, "resource-write"),  # factory remove()
+    }
+
+    @unittest.skipUnless(HAVE_EXTRA, "polyglot extra not installed")
+    def test_fixture_layout_flags_writes_not_reads(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _copy_fixtures(pathlib.Path(td) / "repo")
+            code, out = _run_scan(root)
+        self.assertEqual(code, 0)
+        rest = {f for f in _findings(out) if f[0].startswith("rest/")}
+        self.assertEqual(rest, self.EXPECTED, out)
+
+    @unittest.skipUnless(HAVE_EXTRA, "polyglot extra not installed")
+    def test_json_mode_reports_resource_finding(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td) / "repo"
+            (root / "rest").mkdir(parents=True)
+            (root / "rest" / "account.ts").write_text(
+                "class Version {\n"
+                "  update(opts: any) { return this.request(opts); }\n"
+                "}\n"
+                "class AccountContext {\n"
+                "  constructor(private version: Version) {}\n"
+                "  update() {\n"
+                "    return this.version.update({ uri: \"/x\", method: \"post\" });\n"
+                "  }\n"
+                "  fetch() {\n"
+                "    return this.version.fetch({ uri: \"/x\", method: \"get\" });\n"
+                "  }\n"
+                "}\n")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = cli.scan_cmd(_args(root, pathlib.Path(td) / "policy.json",
+                                          format="json"))
+            out = buf.getvalue()
+        self.assertEqual(code, 0)
+        doc = __import__("json").loads(out)
+        self.assertEqual(doc["files_scanned"], 1)
+        findings = doc["findings"]
+        self.assertEqual(len(findings), 1, doc)
+        f = findings[0]
+        self.assertEqual((f["file"], f["line"], f["function"], f["verb"]),
+                         ("rest/account.ts", 7, "update", "rest.update"))
+        self.assertEqual((f["kind"], f["language"], f["gated"]),
+                         ("http", "tsjs", False))
+        self.assertIn('method: "post"', f["snippet"])
 
 
 class MissingExtraTest(unittest.TestCase):

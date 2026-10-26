@@ -860,7 +860,10 @@ _TSJS_HTTP_VERBS = "post|put|patch|delete|del"
 # Patterns are dotted callee chains (after import aliasing and dropping a
 # leading `this`): `a|b` alternatives, `*` one segment, `**` any segments.
 # Conditions: None, "method" (a literal write method in an options object
-# or as a leading string arg), "sql" (first arg is a literal SQL write).
+# or as a leading string arg), "sql" (first arg is a literal SQL write),
+# "resource_write" (generated REST resource method: the enclosing
+# create/update/patch/remove-style method routes a request that carries an
+# explicit write HTTP method; reads never match).
 _TSJS_RULES = (
     ("child-process", "exec",
      ("child_process.exec|execSync|execFile|execFileSync|spawn|spawnSync|"
@@ -886,6 +889,14 @@ _TSJS_RULES = (
     ("http-config-write", "http",
      ("axios|got|ky|superagent", "axios|got|ky.request",
       "http|https.request"), "method"),
+    # Generated REST resource clients (twilio-style): resource methods named
+    # create/update/patch/remove (+ ...WithHttpInfo) that build request
+    # options with an explicit write HTTP method and route them through the
+    # client request pipeline (Version.request / Domain.request). The
+    # callee is the pipeline, so the pattern is unanchored and the condition
+    # does the work: it never fires on method: "get" or read-named methods
+    # (fetch/list/page/stream/each).
+    ("resource-write", "http", ("**",), "resource_write"),
 )
 
 
@@ -1176,7 +1187,37 @@ def _tsjs_has_write_method(call, f):
     return False
 
 
-def _tsjs_classify(call, chain, f):
+_TSJS_RESOURCE_WRITE_NAMES = frozenset(
+    ("create", "update", "patch", "remove", "del", "delete"))
+_TSJS_HTTPINFO_SUFFIX = "withhttpinfo"
+
+
+def _tsjs_resource_write_func(func_name):
+    """True for generated-REST-resource write methods: create/update/patch/
+    remove (plus del/delete variants) and their ...WithHttpInfo forms.
+    Read-style names (fetch/list/page/stream/each/get) never match."""
+    if not func_name:
+        return False
+    n = func_name.lower()
+    if n.endswith(_TSJS_HTTPINFO_SUFFIX):
+        n = n[:-len(_TSJS_HTTPINFO_SUFFIX)]
+    return n in _TSJS_RESOURCE_WRITE_NAMES
+
+
+def _tsjs_resource_write(call, func_name, f):
+    """Generated-resource write: inside a create/update/patch/remove-style
+    method, a request that carries an explicit write HTTP method (a literal
+    `method: "post"`-style options key, or the method as a leading string
+    arg) routed through a call. The callee is the request pipeline and may
+    be any name (operationVersion.update, this.request, Version.fetch for
+    DELETE-that-returns-a-body), so only the literal decides write-vs-read:
+    `method: "get"` is never a write and read-named enclosing methods never
+    match."""
+    return _tsjs_resource_write_func(func_name) and \
+        _tsjs_has_write_method(call, f)
+
+
+def _tsjs_classify(call, chain, f, func_name):
     for rid, kind, pats, cond in _TSJS_COMPILED:
         if not any(_tsjs_glob(p, chain) for p in pats):
             continue
@@ -1187,6 +1228,9 @@ def _tsjs_classify(call, chain, f):
             lit = f.literal(args[0]) if args else None
             if lit is None or not _TSJS_SQL_WRITE.match(lit):
                 continue
+        if cond == "resource_write" and \
+                not _tsjs_resource_write(call, func_name, f):
+            continue
         return rid, kind
     return None
 
@@ -1229,7 +1273,7 @@ def _tsjs_scan_source(src, filename, parser):
         if chain[-1] in _TSJS_GATE_NAMES:
             gated.add(fkey)
             continue
-        hit = _tsjs_classify(node, chain, f)
+        hit = _tsjs_classify(node, chain, f, fkey[0])
         if hit:
             snippet = " ".join(f.text(node).split())[:100]
             sites.append((_WriteSite(filename, fkey[0], cls,
