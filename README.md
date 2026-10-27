@@ -132,7 +132,11 @@ Python scanning never needs it.
 TS/JS is **scan-only**: findings are listed with verbs for your policy file,
 but `writ scan --apply` never rewrites TS/JS files — gate those by hand.
 Covered patterns: `fetch`/`axios` writes, `fs` writes, SQL through knex-style
-clients, Prisma writes, and JS SDK calls such as `stripe.refunds.create(...)`.
+clients, Prisma writes, JS SDK calls such as `stripe.refunds.create(...)`, and
+generated REST resource clients: `create` / `update` / `patch` / `remove`
+methods (plus their `...WithHttpInfo` variants) that build request options
+with an explicit write HTTP method and route them through the client request
+pipeline (twilio-style generated clients, e.g. `twilio-node`).
 (Still not covered: the *Python* SDK equivalents like `stripe.Refund.create(...)`
 — see "Not covered" above.)
 
