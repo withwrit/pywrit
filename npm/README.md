@@ -76,4 +76,4 @@ wraps `pywrit==0.2.8`.
 ## Docs
 
 Full CLI reference and gating recipes: https://github.com/withwrit/pywrit#readme
-and https://withwrit.com/docs
+and https://docs.withwrit.com
