@@ -8,3 +8,5 @@ export async function placeOrder(orderId: string): Promise<void> {
 
 // trigger rescan after PYTHONPATH fix
 export async function noOp(): Promise<void> {}
+
+# final re-smoke: ts snippet -> money risk class
