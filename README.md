@@ -161,10 +161,11 @@ example workflow: [examples/github-action/writ-scan.yml](examples/github-action/
 
 ## GitHub App
 
-Install the [Writ GitHub App](https://docs.withwrit.com/git-hub-app) on selected
+Install the [Writ GitHub App](https://github.com/apps/writ-scanner) on selected
 repositories: every push and pull request is scanned for ungated write-sites,
 with results as a check run on the PR and in the
 [portal](https://app.withwrit.com), where you manage policy, keys, and the audit log.
+Setup and data handling: [GitHub App docs](https://docs.withwrit.com/git-hub-app).
 
 ## MCP server (`writ-mcp`)
 
