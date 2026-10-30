@@ -69,4 +69,4 @@ curl -s https://api.withwrit.com/v1/badge/tokens/revoke \
 IDs, names, API keys, or receipt contents. The token itself is public by
 design (it sits in your README); it cannot be used as an API key.
 
-Full reference: [docs.withwrit.com/badge](https://docs.withwrit.com/badge).
+Full reference: [docs.withwrit.com/readme-badge](https://docs.withwrit.com/readme-badge).
