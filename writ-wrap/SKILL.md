@@ -240,10 +240,10 @@ writ reinstate --sponsor "$WRIT_SPONSOR" --agent "$WRIT_AGENT"
 ## MCP server alternative (for agents without shell access)
 
 If the agent environment cannot run shell commands, use the **Writ MCP server**
-instead. It exposes the same operations as 8 tools:
+instead. It exposes the same operations as 17 tools:
 
 ```bash
-uvx writ-mcp==0.1.0
+uvx writ-mcp==0.2.0
 ```
 
 Tools available:
@@ -258,6 +258,15 @@ Tools available:
 | `writ_receipts` | Read the audit log (customer-facing: "audit log") |
 | `writ_policy` | Get or set the tenant verb policy |
 | `writ_sandbox` | Keyless trial — no API key needed |
+| `writ_github_installations` | List connected GitHub App installations |
+| `writ_github_set_threshold` | Set the check-run fail threshold per install |
+| `writ_github_toggle_pr_comments` | Enable/disable the PR-comment bot |
+| `writ_manifests` | List repos with risk profiles or fetch one manifest |
+| `writ_explain_receipt` | Explain a receipt in plain language |
+| `writ_tenant_notify` | Get or update step-up notification settings |
+| `writ_principals` | List the tenant's principals |
+| `writ_verbs` | List the tenant's verb vocabulary |
+| `writ_keys` | List API key metadata |
 
 Use `writ_policy` to list known verbs before mapping findings. Use `writ_check`
 to verify a live decision, then `writ_receipts` to confirm it landed in the
