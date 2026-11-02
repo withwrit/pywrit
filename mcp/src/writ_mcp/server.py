@@ -1,4 +1,4 @@
-"""Writ MCP server — commit-time policy checks for AI agents, as MCP tools.
+"""Writ MCP server — point-of-action policy checks for AI agents, as MCP tools.
 
 An agent (or any MCP client) calls `writ_check` BEFORE performing a
 consequential write. Writ answers ALLOW, DENY, or STEP_UP, and every outcome
@@ -78,7 +78,7 @@ def _fmt(result):
 
 
 @mcp.tool()
-def writ_check(sponsor_id: str, agent_id: str, verb: str, target: str, purpose: str) -> str:
+def writ_check(sponsor_id: str, agent_id: str, verb: str, target: str, purpose: str, environment: str = "") -> str:
     """Ask Writ whether an action may proceed. CALL THIS BEFORE any consequential write.
 
     A consequential write is anything hard to undo: sending money or messages,
@@ -91,6 +91,11 @@ def writ_check(sponsor_id: str, agent_id: str, verb: str, target: str, purpose: 
         verb:       What is being done (e.g. "verify_human", "send_payment").
         target:     What it acts on (e.g. "benefit-case-123").
         purpose:    Why, in plain words. Be specific — the approval is bound to this purpose.
+        environment: Optional policy environment: "dev", "staging", or "prod".
+            The check runs against that environment's policy override (verbs it
+            doesn't override inherit the tenant default). Omit for the tenant
+            default. An unknown name denies fail-closed — never silently falls
+            back.
 
     Returns a decision:
       ALLOW   — proceed. You get an authToken valid 90 seconds, bound to this
@@ -103,10 +108,13 @@ def writ_check(sponsor_id: str, agent_id: str, verb: str, target: str, purpose: 
     Every outcome creates an audit receipt with a receiptId.
     """
     try:
-        return _fmt(_key_call("POST", "/v1/check", {
+        body = {
             "sponsorId": sponsor_id, "agentId": agent_id,
             "verb": verb, "target": target, "purpose": purpose,
-        }))
+        }
+        if environment:
+            body["environment"] = environment
+        return _fmt(_key_call("POST", "/v1/check", body))
     except WritError as e:
         return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
 
@@ -119,7 +127,7 @@ def writ_verify_token(auth_token: str, verb: str, target: str, purpose: str) -> 
     verb/target/purpose you intend. If valid is false — expired, tampered, or
     bound to a different purpose — do NOT execute the write; call writ_check again.
 
-    This is the commit-time enforcement: the check authorizes, the token proves
+    This is the point-of-action enforcement: the check authorizes, the token proves
     the authorization still matches what you are actually doing.
     """
     try:
@@ -216,6 +224,132 @@ def writ_sandbox(sponsor_id: str, agent_id: str, target: str, purpose: str) -> s
         })
         return _fmt({"sandboxGrant": grant,
                      "note": 'Now call writ_check with verb "demo_write" to get your ALLOW + authToken.'})
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
+@mcp.tool()
+def writ_github_installations() -> str:
+    """List the GitHub App installations for this tenant.
+
+    Returns each installation's id, status, PR-comment bot setting, and the
+    per-installation check-run fail threshold (checkFailUngated). Use this to
+    discover installation ids before calling writ_github_set_threshold or
+    writ_github_toggle_pr_comments.
+    """
+    try:
+        return _fmt(_key_call("GET", "/v1/github/installations"))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
+@mcp.tool()
+def writ_github_set_threshold(installation_id: str, threshold: int = None) -> str:
+    """Set the per-installation check-run fail threshold.
+
+    A positive number N makes the GitHub check run fail when the ungated-site
+    count is greater than N; a zero-ungated scan passes. Omit threshold (or set
+    it to None) to clear the override and restore neutral-only check runs.
+    """
+    try:
+        body = {"installationId": installation_id}
+        if threshold is not None:
+            body["threshold"] = threshold
+        return _fmt(_key_call("POST", "/v1/github/check-fail-threshold", body))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
+@mcp.tool()
+def writ_github_toggle_pr_comments(installation_id: str, enabled: bool) -> str:
+    """Enable or disable the optional PR-comment bot for a GitHub App installation.
+
+    Default is OFF. No TOTP step-up is required. Use writ_github_installations
+    to find installation_id.
+    """
+    try:
+        return _fmt(_key_call("POST", "/v1/github/pr-comments",
+            {"installationId": installation_id, "enabled": enabled}))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
+@mcp.tool()
+def writ_manifests(repo_id: str = "") -> str:
+    """List scanned repos and their risk profiles, or fetch one manifest.
+
+    With no repo_id, returns a table of repos with writScore, scanStatus, and
+    riskDigest (counts per risk class). With repo_id, returns the full signed
+    manifest for that repo.
+    """
+    try:
+        path = "/v1/manifests"
+        if repo_id:
+            path += "/" + urllib.parse.quote(repo_id, safe="")
+        return _fmt(_key_call("GET", path))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
+@mcp.tool()
+def writ_explain_receipt(receipt_id: str) -> str:
+    """Fetch a receipt and explain it in plain language.
+
+    Use this to understand why a writ_check returned ALLOW, DENY, STEP_UP, or
+    REVOKED. Returns the receipt with a human-readable breakdown.
+    """
+    try:
+        return _fmt(_key_call("GET", "/v1/receipts/" + urllib.parse.quote(receipt_id, safe="")))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
+@mcp.tool()
+def writ_tenant_notify(step_up_email: bool = None, step_up_webhook_url: str = "",
+                       step_up_webhook_type: str = "") -> str:
+    """Get or update step-up notification settings.
+
+    With no arguments, returns the current settings. With arguments, updates
+    them: step_up_email enables/disables step-up emails; step_up_webhook_url
+    sets a generic or Slack webhook URL; use an empty string to clear.
+    """
+    try:
+        body = {}
+        if step_up_email is not None:
+            body["stepUpEmail"] = step_up_email
+        if step_up_webhook_url:
+            body["stepUpWebhookUrl"] = step_up_webhook_url
+            body["stepUpWebhookType"] = step_up_webhook_type or "generic"
+        if body:
+            return _fmt(_key_call("POST", "/v1/tenant/notify", body))
+        return _fmt(_key_call("GET", "/v1/tenant/notify"))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
+@mcp.tool()
+def writ_principals() -> str:
+    """List the tenant's principals (identity directory)."""
+    try:
+        return _fmt(_key_call("GET", "/v1/principals"))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
+@mcp.tool()
+def writ_verbs() -> str:
+    """List the tenant's verb vocabulary, including custom verbs."""
+    try:
+        return _fmt(_key_call("GET", "/v1/verbs"))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
+@mcp.tool()
+def writ_keys() -> str:
+    """List API key metadata for the tenant (never raw keys)."""
+    try:
+        return _fmt(_key_call("GET", "/v1/keys"))
     except WritError as e:
         return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
 

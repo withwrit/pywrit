@@ -14,11 +14,20 @@ EXPECTED_TOOLS = {
     "writ_receipts",
     "writ_policy",
     "writ_sandbox",
+    "writ_github_installations",
+    "writ_github_set_threshold",
+    "writ_github_toggle_pr_comments",
+    "writ_manifests",
+    "writ_explain_receipt",
+    "writ_tenant_notify",
+    "writ_principals",
+    "writ_verbs",
+    "writ_keys",
 }
 
 
 def test_version():
-    assert writ_mcp.__version__ == "0.1.0"
+    assert writ_mcp.__version__ == "0.2.0"
 
 
 def test_public_base_url_default():

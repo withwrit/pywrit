@@ -85,6 +85,15 @@ The tool descriptions teach the agent this flow, but the short version:
 | `writ_receipts` | agent | Audit trail of decisions |
 | `writ_policy` | agent | Tenant verb policy |
 | `writ_sandbox` | anyone | Free 90-second demo grant, no key needed |
+| `writ_github_installations` | admin | List connected GitHub App installations |
+| `writ_github_set_threshold` | admin | Set the check-run fail threshold per install |
+| `writ_github_toggle_pr_comments` | admin | Enable/disable the PR-comment bot |
+| `writ_manifests` | agent | List repos with risk profiles or fetch one manifest |
+| `writ_explain_receipt` | agent | Explain a receipt in plain language |
+| `writ_tenant_notify` | admin | Get or update step-up notification settings |
+| `writ_principals` | admin | List the tenant's principals |
+| `writ_verbs` | admin | List the tenant's verb vocabulary |
+| `writ_keys` | admin | List API key metadata |
 
 Try it with no key: `writ_sandbox` → `writ_check` with `verb="demo_write"`.
 
