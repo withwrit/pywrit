@@ -93,6 +93,5 @@ Try it with no key: `writ_sandbox` → `writ_check` with `verb="demo_write"`.
 Public repo: [withwrit/pywrit](https://github.com/withwrit/pywrit) (`mcp/`
 directory). License: MIT.
 
-Directory listings: [Smithery](https://smithery.ai/server/withwrit/writ-mcp) ·
-[Glama](https://glama.ai/mcp/servers/withwrit/pywrit) · MCP Registry
-`io.github.withwrit/writ`.
+Directory listings: [Glama](https://glama.ai/mcp/servers/withwrit/pywrit) ·
+MCP Registry `io.github.withwrit/writ`.
