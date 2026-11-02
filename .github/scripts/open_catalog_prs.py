@@ -282,8 +282,26 @@ def main():
     print(f"Using writ-mcp version: {VERSION}")
 
     configure_git()
-    open_hermes_pr()
-    open_awesome_pr()
+
+    # Catalog updates are best-effort and each target is independent:
+    # a failure in one (for example, the workflow token cannot push to a
+    # catalog fork) must not skip the other target or fail the run.
+    # Failures are logged as warnings and summarized; main() exits 0.
+    failures = []
+    for name, open_pr in (
+        ("Hermes", open_hermes_pr),
+        ("awesome-mcp-servers", open_awesome_pr),
+    ):
+        try:
+            open_pr()
+        except BaseException as exc:  # includes SystemExit from a target
+            failures.append(f"{name}: {exc}")
+            print(f"::warning::Catalog target {name} failed (non-fatal): {exc}")
+
+    if failures:
+        print("Catalog PR summary (non-fatal failures): " + "; ".join(failures))
+    else:
+        print("Catalog PR summary: all targets handled.")
 
 
 if __name__ == "__main__":
