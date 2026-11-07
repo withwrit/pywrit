@@ -129,6 +129,12 @@ optional extra (tree-sitter based):
 Without the extra, the scanner prints a one-line hint and keeps going —
 Python scanning never needs it.
 
+Findings from non-product paths (docs/, scripts/, sandbox/, examples/,
+benchmark/, demo/, and build-tooling files such as gulpfile.js or
+webpack.config.*) are suppressed by default: the report counts them per
+class and names every suppressed path instead of listing them as findings.
+Pass `--include-non-product` to report them like any other finding.
+
 TS/JS is **scan-only**: findings are listed with verbs for your policy file,
 but `writ scan --apply` never rewrites TS/JS files — gate those by hand.
 Covered patterns: `fetch`/`axios` writes, `fs` writes, SQL through knex-style
