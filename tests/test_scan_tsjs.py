@@ -337,6 +337,49 @@ class MissingExtraTest(unittest.TestCase):
                                        "    orders.create\n" % root.resolve()), out)
 
 
+class NonProductScanTest(unittest.TestCase):
+    """Axios-class noise: non-product paths are suppressed by default,
+    counted per class with paths named, and restored by the flag."""
+
+    WRITE = 'fetch("https://api.example.com/x", {method: "POST"})\n'
+
+    def _layout(self, root):
+        (root / "lib").mkdir(parents=True)
+        (root / "lib" / "core.js").write_text(self.WRITE)
+        for d in ("docs/scripts", "scripts", "sandbox", "examples"):
+            p = root / d
+            p.mkdir(parents=True)
+            (p / "tool.js").write_text(self.WRITE)
+        (root / "gulpfile.js").write_text(self.WRITE)
+        (root / "lib" / "benchmark-utils.ts").write_text(self.WRITE)
+
+    @unittest.skipUnless(HAVE_EXTRA, "polyglot extra not installed")
+    def test_suppressed_by_default_and_restored_by_flag(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            self._layout(root)
+            res = cli._tsjs_scan(root, [])
+            self.assertEqual(len(res["sites"]), 2)  # lib/core.js + benchmark-utils.ts
+            total = cli._tsjs_suppressed_total(res["suppressed"])
+            self.assertEqual(total, 5)
+            res2 = cli._tsjs_scan(root, [], include_non_product=True)
+            self.assertEqual(len(res2["sites"]), 7)
+            self.assertEqual(res2["suppressed"], {})
+
+    def test_path_class_units(self):
+        root = pathlib.Path("/repo")
+        self.assertEqual(
+            cli._tsjs_non_product_class(root / "docs" / "a.js", root), "docs")
+        self.assertEqual(
+            cli._tsjs_non_product_class(root / "gulpfile.js", root),
+            "build-tooling")
+        self.assertIsNone(
+            cli._tsjs_non_product_class(root / "lib" / "benchmark-utils.ts",
+                                        root))
+        self.assertIsNone(
+            cli._tsjs_non_product_class(root / "lib" / "core.js", root))
+
+
 class CliSyncTest(unittest.TestCase):
     def test_download_copy_is_byte_identical(self):
         web = HERE.parent.parent / "gate" / "web" / "writ"

@@ -826,6 +826,54 @@ _TSJS_EXTS = {".ts": "typescript", ".tsx": "tsx", ".js": "javascript",
 _TSJS_SKIP_DIR_NAMES = _SKIP_DIR_NAMES | {".next", "vendor", "venv", ".venv"}
 _TSJS_TEST_DIRS = {"tests", "testing", "__tests__"}
 _TSJS_MAX_BYTES = 1000000  # larger files are almost always bundles
+
+# Non-product path classes. Write findings from these paths parse as real
+# writes but are almost never product behavior — docs tooling, build/test
+# scripts, demos, benchmarks (the axios-class scan noise: gulpfile.js,
+# docs/scripts/*, sandbox/*, scripts/benchmark-*). They are suppressed from
+# the report by default — counted per class under "suppressed" — and
+# restored with --include-non-product. Matching is by whole directory
+# segment or exact build-file basename, never filename substring, so
+# product code next to an excluded directory (and files like
+# lib/benchmark-utils.ts) stays reported. This is the single, central
+# exclusion list for TS/JS; don't scatter string matches elsewhere.
+_TSJS_NON_PRODUCT_DIRS = {
+    "docs": {"docs", "doc"},
+    "scripts": {"scripts"},
+    "examples": {"examples", "example"},
+    "sandbox": {"sandbox"},
+    "benchmark": {"benchmark", "benchmarks"},
+    "demo": {"demo", "demos"},
+}
+_TSJS_BUILD_TOOL_FILE = _re.compile(
+    r"^(gulpfile|gruntfile)(\.babel)?\.(js|mjs|cjs|ts)$"
+    r"|^(webpack|rollup|vite|esbuild|tsup|snowpack|babel)\.config\.(js|mjs|cjs|ts)$"
+    r"|^karma\.conf\.(js|mjs|cjs|ts)$", _re.I)
+
+
+def _tsjs_non_product_class(path, root):
+    """Return the non-product path class for a TS/JS file, or None.
+
+    Directory classes match on whole path segments (docs/, scripts/,
+    sandbox/, examples/, benchmark/, demo/ at any depth), so a product
+    file beside an excluded directory is unaffected. Build-tooling files
+    (gulpfile.js, Gruntfile.js, webpack.config.*, rollup.config.*,
+    vite.config.*, and equivalents) match by exact basename anywhere in
+    the tree so monorepo package configs are covered too.
+    """
+    rel = path.relative_to(root)
+    segs = set(rel.parts[:-1])
+    for cls, names in _TSJS_NON_PRODUCT_DIRS.items():
+        if segs & names:
+            return cls
+    if _TSJS_BUILD_TOOL_FILE.match(path.name):
+        return "build-tooling"
+    return None
+
+
+def _tsjs_suppressed_total(suppressed):
+    """Total suppressed sites across all non-product classes."""
+    return sum(b["sites"] for b in (suppressed or {}).values())
 _TSJS_HINT = ("hint: %d TS/JS file(s) not scanned; install the extra: "
               "pip install 'pywrit[polyglot]'")
 _TSJS_WRITE_METHODS = {"post", "put", "patch", "delete"}
@@ -1289,12 +1337,17 @@ def _tsjs_verb(rel, func_name, cls_name, kind):
     return infer_verb(base, snake, cls_name, kind)
 
 
-def _tsjs_scan(root, excludes):
-    """Return dict with files, skipped, sites, gated, or hint when the
-    extra is missing. Never raises on a bad file."""
+def _tsjs_scan(root, excludes, include_non_product=False):
+    """Return dict with files, skipped, sites, gated, suppressed, or hint
+    when the extra is missing. Never raises on a bad file.
+
+    Findings from non-product paths (_tsjs_non_product_class) are not
+    dropped — they are counted per path class in res["suppressed"] so the
+    report can say exactly what was held back. include_non_product restores
+    the old behavior of reporting every site."""
     files = _tsjs_collect_files(root, excludes)
     res = {"files": files, "skipped": [], "sites": [], "gated": set(),
-           "missing_extra": False}
+           "suppressed": {}, "missing_extra": False}
     if not files:
         return res
     parsers = _tsjs_parsers()
@@ -1311,6 +1364,14 @@ def _tsjs_scan(root, excludes):
                 src, str(path), parsers[_TSJS_EXTS[path.suffix]])
         except Exception:
             res["skipped"].append(str(path))
+            continue
+        cls = None if include_non_product \
+            else _tsjs_non_product_class(path, root)
+        if cls is not None and sites:
+            bucket = res["suppressed"].setdefault(
+                cls, {"sites": 0, "files": {}})
+            bucket["sites"] += len(sites)
+            bucket["files"][str(path)] = len(sites)
             continue
         res["sites"].extend(sites)
         res["gated"].update((str(path),) + g for g in gated)
@@ -1375,10 +1436,24 @@ def print_scan_json(root, files, skipped, sites, gated_funcs, tsjs, ts_sites):
         "findings": _scan_findings_json(root, sites, gated_funcs, tsjs,
                                         ts_sites),
     }
+    ts_suppressed = tsjs.get("suppressed") or {}
+    ts_sup_total = _tsjs_suppressed_total(ts_suppressed)
+    if ts_sup_total:
+        # Non-product findings held back by default: never dropped
+        # silently — the report names every suppressed path.
+        doc["tsjs_suppressed_non_product"] = {
+            "sites": ts_sup_total,
+            "by_class": {c: ts_suppressed[c]["sites"]
+                         for c in sorted(ts_suppressed)},
+            "files": sorted(
+                str(_pathlib.Path(f).relative_to(root))
+                for c in ts_suppressed.values()
+                for f in c["files"]),
+        }
     print(json.dumps(doc, indent=2))
 
 
-def _scan_repo(root, excludes):
+def _scan_repo(root, excludes, include_non_product=False):
     """Collect Python and TS/JS files and find write sites.
 
     Returns (files, skipped, sites, gated, tsjs). This is the read-only
@@ -1402,7 +1477,8 @@ def _scan_repo(root, excludes):
         sites.extend(v.sites)
         gated.update((str(path), n, ln) for (n, ln) in v.gated)
 
-    tsjs = _tsjs_scan(root, excludes or [])
+    tsjs = _tsjs_scan(root, excludes or [],
+                      include_non_product=include_non_product)
     return files, skipped, sites, gated, tsjs
 
 
@@ -1516,7 +1592,9 @@ def scan_cmd(args):
         print("error: not a directory: %s" % args.path, file=sys.stderr)
         return 2
 
-    files, skipped, sites, gated, tsjs = _scan_repo(root, args.exclude or [])
+    files, skipped, sites, gated, tsjs = _scan_repo(
+        root, args.exclude or [],
+        include_non_product=getattr(args, "include_non_product", False))
     analysis = _analyze_scan(root, files, skipped, sites, gated, tsjs)
     by_func = analysis["by_func"]
     ts_by_func = analysis["ts_by_func"]
@@ -1560,6 +1638,19 @@ def scan_cmd(args):
             print("    %s:%d [%s] %s %s(): %s" % (
                 _pathlib.Path(s.file).relative_to(root), s.lineno, s.kind,
                 rid, s.func or "<module>", s.snippet))
+        suppressed = tsjs.get("suppressed") or {}
+        sup_total = _tsjs_suppressed_total(suppressed)
+        if sup_total:
+            by_class = ", ".join("%s: %d" % (c, suppressed[c]["sites"])
+                                 for c in sorted(suppressed))
+            print("  ts/js non-product: %d site(s) suppressed (%s); "
+                  "re-run with --include-non-product to show them"
+                  % (sup_total, by_class))
+            for cls in sorted(suppressed):
+                for f in sorted(suppressed[cls]["files"]):
+                    print("    suppressed %s: %d site(s) [%s]" % (
+                        _pathlib.Path(f).relative_to(root),
+                        suppressed[cls]["files"][f], cls))
     if verbs:
         print("  verbs discovered: %d" % len(verbs))
         for vname in sorted(verbs):
@@ -2138,6 +2229,13 @@ def main():
                       help="Output format: human-readable text (default) or "
                            "machine-readable JSON risk report (read-only; no "
                            "policy file, no diffs)")
+    scan.add_argument("--include-non-product", action="store_true",
+                      help="Include TS/JS findings from non-product paths that the "
+                           "scan suppresses by default: docs/, scripts/, sandbox/, "
+                           "examples/, benchmark/, demo/ directories and "
+                           "build-tooling files (gulpfile.js, webpack.config.*, "
+                           "rollup.config.*, vite.config.*, ...). Suppressed sites "
+                           "are always reported as a per-class count.")
     scan.add_argument("--push-policy", action="store_true",
                       help="PUT the discovered policy to the gate (needs --key)")
     scan.add_argument("--key", default="",
