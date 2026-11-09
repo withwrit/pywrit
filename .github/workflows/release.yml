@@ -53,20 +53,17 @@ jobs:
       - name: Build and publish writ-scan npm package
         if: hashFiles('npm/package.json') != ''
         working-directory: npm
-        # OIDC trusted publishing is configured but not yet working for this
-        # package on npmjs.com; falling back to NPM_TOKEN for v0.2.7 only.
-        # id-token: write is kept so OIDC can be re-enabled once registry-side
-        # claim matching is fixed.
+        # npm trusted publishing (OIDC): the Trusted Publisher entry for
+        # withwrit/pywrit + release.yml is configured on npmjs.com.
+        # npm exchanges the workflow GitHub OIDC token (id-token: write
+        # is set in the top-level permissions). No npm token secret is used.
         run: |
           PKG_VERSION=$(node -p 'require("./package.json").version')
           if [ "$(npm view writ-scan version 2>/dev/null || true)" = "$PKG_VERSION" ]; then
             echo "writ-scan $PKG_VERSION already published; skipping npm publish"
             exit 0
           fi
-          printf 'registry=https://registry.npmjs.org/\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" > .npmrc
           npm publish --access public
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Move GitHub Action major/minor tags
         if: hashFiles('action.yml') != ''
