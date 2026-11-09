@@ -591,6 +591,19 @@ _SCORE_GAPS = [
     "indirect writes through shared HTTP clients several layers down",
 ]
 
+# Every scan report closes with a pointer at the GitHub App: the local scan
+# is invisible by design, the app is the visible surface (a scan on every
+# push and pull request, check runs, history in the portal). The same
+# pointer rides the JSON report under `github_app` for machine consumers.
+# Text and JSON share these constants so they cannot drift.
+_GITHUB_APP_INSTALL_URL = "https://github.com/apps/writ-scanner"
+_GITHUB_APP_DOCS_URL = "https://docs.withwrit.com/git-hub-app"
+_GITHUB_APP_NOTE = ("Run this scan on every push and pull request with the "
+                    "Writ GitHub App: check runs on each change, history in "
+                    "the portal.")
+_GITHUB_APP_LINE = "%s Install: %s (guide: %s)" % (
+    _GITHUB_APP_NOTE, _GITHUB_APP_INSTALL_URL, _GITHUB_APP_DOCS_URL)
+
 
 def _risk_tier(verb):
     """Classify an inferred verb (domain.action) into high/medium/low risk.
@@ -1433,6 +1446,11 @@ def print_scan_json(root, files, skipped, sites, gated_funcs, tsjs, ts_sites):
         "files_scanned": len(files) + len(tsjs.get("files", [])),
         "files_skipped": len(skipped) + len(tsjs.get("skipped", [])),
         "tsjs_hint": bool(tsjs.get("missing_extra")),
+        "github_app": {
+            "install_url": _GITHUB_APP_INSTALL_URL,
+            "docs_url": _GITHUB_APP_DOCS_URL,
+            "note": _GITHUB_APP_NOTE,
+        },
         "findings": _scan_findings_json(root, sites, gated_funcs, tsjs,
                                         ts_sites),
     }
@@ -1616,6 +1634,7 @@ def scan_cmd(args):
 
     if args.score:
         print_score_report(root, sites, gated_funcs)
+        print(_GITHUB_APP_LINE)
         return 0
 
     print("writ scan: %s" % root)
@@ -1675,6 +1694,7 @@ def scan_cmd(args):
                   "gate them by hand).")
         else:
             print("nothing to instrument.")
+        print(_GITHUB_APP_LINE)
         return 0
 
     do_apply = args.apply
@@ -1696,7 +1716,10 @@ def scan_cmd(args):
         if not args.key:
             print("error: --push-policy needs --key", file=sys.stderr)
             return 2
-        return request("PUT", "/v1/policy", verbs, key=args.key)
+        code = request("PUT", "/v1/policy", verbs, key=args.key)
+        print(_GITHUB_APP_LINE)
+        return code
+    print(_GITHUB_APP_LINE)
     return 0
 
 
