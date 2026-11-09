@@ -135,6 +135,12 @@ webpack.config.*) are suppressed by default: the report counts them per
 class and names every suppressed path instead of listing them as findings.
 Pass `--include-non-product` to report them like any other finding.
 
+Every scan report ends with a one-line pointer to the Writ GitHub App
+(install: https://github.com/apps/writ-scanner, guide:
+https://docs.withwrit.com/git-hub-app), which runs the scan on every push
+and pull request; the JSON report (`--format json`) carries the same
+pointer under `github_app`.
+
 TS/JS is **scan-only**: findings are listed with verbs for your policy file,
 but `writ scan --apply` never rewrites TS/JS files — gate those by hand.
 Covered patterns: `fetch`/`axios` writes, `fs` writes, SQL through knex-style

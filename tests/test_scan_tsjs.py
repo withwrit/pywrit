@@ -380,6 +380,101 @@ class NonProductScanTest(unittest.TestCase):
             cli._tsjs_non_product_class(root / "lib" / "core.js", root))
 
 
+class GitHubAppLineTest(unittest.TestCase):
+    """Regression: every scan report ends with the GitHub App line.
+
+    The local scan is invisible by design; the GitHub App is the visible
+    surface. The text report's last line points at it on every outcome
+    (findings found, zero findings, suppressed-only, --score), and the
+    JSON report carries the same pointer under `github_app`.
+    """
+
+    LINE = ("Run this scan on every push and pull request with the Writ "
+            "GitHub App: check runs on each change, history in the portal. "
+            "Install: https://github.com/apps/writ-scanner "
+            "(guide: https://docs.withwrit.com/git-hub-app)")
+
+    FINDING_REPO = {
+        "app.py": ('import requests\n\n\n'
+                   'def send(url):\n'
+                   '    return requests.post(url, json={})\n'),
+    }
+    CLEAN_REPO = {
+        "app.py": ('def read():\n'
+                   '    return open("/tmp/x").read()\n'),
+    }
+
+    def _repo(self, root, files):
+        for rel, src in files.items():
+            p = root / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(src)
+
+    def _last_line(self, out):
+        lines = [ln for ln in out.splitlines() if ln.strip()]
+        return lines[-1] if lines else ""
+
+    def test_findings_found_run_ends_with_app_line(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td) / "repo"
+            root.mkdir()
+            self._repo(root, self.FINDING_REPO)
+            code, out = _run_scan(root)
+        self.assertEqual(code, 0)
+        self.assertIn("write sites: 1 in 1 function(s)", out)
+        self.assertEqual(self._last_line(out), self.LINE)
+
+    def test_zero_findings_run_ends_with_app_line(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td) / "repo"
+            root.mkdir()
+            self._repo(root, self.CLEAN_REPO)
+            code, out = _run_scan(root)
+        self.assertEqual(code, 0)
+        self.assertIn("write sites: 0 in 0 function(s)", out)
+        self.assertEqual(self._last_line(out), self.LINE)
+
+    def test_score_only_run_ends_with_app_line(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td) / "repo"
+            root.mkdir()
+            self._repo(root, self.FINDING_REPO)
+            code, out = _run_scan(root, score=True)
+        self.assertEqual(code, 0)
+        self.assertEqual(self._last_line(out), self.LINE)
+
+    def test_json_report_carries_github_app_field(self):
+        import json as j
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td) / "repo"
+            root.mkdir()
+            self._repo(root, self.FINDING_REPO)
+            code, out = _run_scan(root, format="json")
+            self.assertEqual(code, 0, out)
+            app = j.loads(out)["github_app"]
+        self.assertEqual(app, {
+            "install_url": "https://github.com/apps/writ-scanner",
+            "docs_url": "https://docs.withwrit.com/git-hub-app",
+            "note": ("Run this scan on every push and pull request with "
+                     "the Writ GitHub App: check runs on each change, "
+                     "history in the portal."),
+        })
+
+    @unittest.skipUnless(HAVE_EXTRA, "polyglot extra not installed")
+    def test_suppressed_only_run_ends_with_app_line(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td) / "repo"
+            root.mkdir()
+            self._repo(root, {
+                "docs/scripts/tool.js": NonProductScanTest.WRITE * 3,
+            })
+            code, out = _run_scan(root)
+        self.assertEqual(code, 0)
+        self.assertIn("ts/js write sites: 0 in 0 function(s)", out)
+        self.assertIn("ts/js non-product: 3 site(s) suppressed", out)
+        self.assertEqual(self._last_line(out), self.LINE)
+
+
 class CliSyncTest(unittest.TestCase):
     def test_download_copy_is_byte_identical(self):
         web = HERE.parent.parent / "gate" / "web" / "writ"
