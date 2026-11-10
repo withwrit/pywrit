@@ -32,6 +32,14 @@ first run it installs `pywrit[polyglot]` from PyPI using your Python 3.9+
 environment overrides (`WRIT_PYTHON`, `WRIT_SCAN_NO_INSTALL`), and the
 install test.
 
+## Language coverage
+
+| Language | `writ scan` | `writ scan --apply` | Notes |
+| --- | --- | --- | --- |
+| Python | Yes | Yes, inserts `_writ_check` gates | Parsed with the stdlib `ast`, no extra needed |
+| TypeScript / JavaScript | Yes, with `pywrit[polyglot]` | No, scan only | Needs the extra: `pip install 'pywrit[polyglot]'`. Without it, the report says so loudly: a warning block names the unscanned files instead of reporting zero findings |
+| Go | No | No | On the roadmap |
+
 ## 60-second quickstart: scan → wrap → gate
 
 **1. Scan.** See which functions write, and how many of them are gated.
@@ -126,8 +134,8 @@ optional extra (tree-sitter based):
     pip install 'pywrit[polyglot]'
     writ scan .
 
-Without the extra, the scanner prints a one-line hint and keeps going —
-Python scanning never needs it.
+Without the extra, the scanner prints a prominent warning block naming the
+unscanned TS/JS files and keeps going — Python scanning never needs it.
 
 Findings from non-product paths (docs/, scripts/, sandbox/, examples/,
 benchmark/, demo/, and build-tooling files such as gulpfile.js or

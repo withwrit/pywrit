@@ -302,24 +302,94 @@ class ResourceWriteTest(unittest.TestCase):
 
 
 class MissingExtraTest(unittest.TestCase):
-    def test_hint_once_and_python_still_scanned(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = pathlib.Path(td)
-            (root / "web").mkdir()
-            (root / "web" / "a.ts").write_text(FileWalkTest.WRITE)
-            (root / "web" / "b.js").write_text(FileWalkTest.WRITE)
+    BLOCK = [
+        "  " + "-" * 64,
+        "  WARNING: 2 TS/JS file(s) were seen but none were scanned.",
+        "  The polyglot extra is not installed, so this report covers",
+        "  Python only. Zero TS/JS findings is a coverage gap, not a",
+        "  clean result.",
+        "  Install it with: pip install 'pywrit[polyglot]'",
+        "  " + "-" * 64,
+    ]
+
+    def _repo(self, root, with_python=True):
+        (root / "web").mkdir()
+        (root / "web" / "a.ts").write_text(FileWalkTest.WRITE)
+        (root / "web" / "b.js").write_text(FileWalkTest.WRITE)
+        if with_python:
             (root / "orders.py").write_text(
                 'def create_order(db):\n    db.execute("INSERT INTO o VALUES (1)")\n')
+
+    def _last_line(self, out):
+        lines = [ln for ln in out.splitlines() if ln.strip()]
+        return lines[-1] if lines else ""
+
+    def test_prominent_block_once_and_python_still_scanned(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            self._repo(root)
             with mock.patch.dict(sys.modules, _BLOCK_EXTRA):
                 self.assertEqual(cli._tsjs_parsers(), {})
                 code, out = _run_scan(root)
         self.assertEqual(code, 0)
-        hints = [l for l in out.splitlines() if "hint:" in l]
-        self.assertEqual(hints, ["  hint: 2 TS/JS file(s) not scanned; install "
-                                 "the extra: pip install 'pywrit[polyglot]'"])
+        for line in self.BLOCK:
+            self.assertIn(line, out)
+        self.assertEqual(
+            out.count("WARNING: 2 TS/JS file(s) were seen but none were "
+                      "scanned."), 1)
+        self.assertNotIn("hint:", out)
         self.assertIn("write sites: 1 in 1 function(s)", out)
         self.assertIn("orders.create", out)
         self.assertNotIn("ts/js files scanned", out)
+        self.assertEqual(self._last_line(out), GitHubAppLineTest.LINE)
+
+    def test_normal_path_qualified_verdict_on_ts_only_repo(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            self._repo(root, with_python=False)
+            with mock.patch.dict(sys.modules, _BLOCK_EXTRA):
+                code, out = _run_scan(root)
+        self.assertEqual(code, 0)
+        for line in self.BLOCK:
+            self.assertIn(line, out)
+        # the bare verdict must not stand while TS/JS went unscanned
+        self.assertIn("No write operations discovered in the files that "
+                      "were scanned.", out)
+        self.assertNotIn("\nNo write operations discovered.\n", out)
+        self.assertEqual(self._last_line(out), GitHubAppLineTest.LINE)
+
+    def test_score_path_block_and_qualified_verdict(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            self._repo(root, with_python=False)
+            with mock.patch.dict(sys.modules, _BLOCK_EXTRA):
+                code, out = _run_scan(root, score=True)
+        self.assertEqual(code, 0)
+        for line in self.BLOCK:
+            self.assertIn(line, out)
+        self.assertIn("No write operations discovered in the files that "
+                      "were scanned.", out)
+        self.assertNotIn("\nNo write operations discovered.\n", out)
+        self.assertEqual(self._last_line(out), GitHubAppLineTest.LINE)
+
+    def test_json_report_records_unscanned_tsjs(self):
+        import json as j
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            self._repo(root, with_python=False)
+            with mock.patch.dict(sys.modules, _BLOCK_EXTRA):
+                code, out = _run_scan(root, format="json")
+            self.assertEqual(code, 0, out)
+            doc = j.loads(out)
+        self.assertTrue(doc["tsjs_hint"])
+        self.assertEqual(doc["tsjs_not_scanned"], {
+            "reason": "missing_extra",
+            "extra": "pywrit[polyglot]",
+            "files": 2,
+            "install_command": "pip install 'pywrit[polyglot]'",
+        })
+        self.assertEqual(doc["findings"], [])
+        self.assertIn("github_app", doc)
 
     def test_python_only_repo_output_unchanged(self):
         with tempfile.TemporaryDirectory() as td:
