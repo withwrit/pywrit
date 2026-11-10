@@ -660,8 +660,15 @@ def _writ_score(rows):
     return max(0, 100 - penalty)
 
 
-def print_score_report(root, sites, gated_funcs):
-    """Print the risk report and Writ Score. Pure read-only: no files written."""
+def print_score_report(root, sites, gated_funcs, unscanned_tsjs=0):
+    """Print the risk report and Writ Score. Pure read-only: no files written.
+
+    unscanned_tsjs counts TS/JS files that were collected but never
+    scanned (polyglot extra missing). When it is nonzero and no Python
+    write was found, the verdict says so: "No write operations
+    discovered" on its own would read as a clean result for a repo the
+    scanner only half saw.
+    """
     rows = _score_report_rows(root, sites, gated_funcs)
     total = len(rows)
     score = _writ_score(rows)
@@ -677,7 +684,10 @@ def print_score_report(root, sites, gated_funcs):
         print("Writ Score: %d/100" % score)
     print()
     if not total:
-        print("No write operations discovered.")
+        if unscanned_tsjs:
+            print("No write operations discovered in the files that were scanned.")
+        else:
+            print("No write operations discovered.")
         print()
     else:
         print("%d write operations discovered" % total)
@@ -887,8 +897,25 @@ def _tsjs_non_product_class(path, root):
 def _tsjs_suppressed_total(suppressed):
     """Total suppressed sites across all non-product classes."""
     return sum(b["sites"] for b in (suppressed or {}).values())
-_TSJS_HINT = ("hint: %d TS/JS file(s) not scanned; install the extra: "
-              "pip install 'pywrit[polyglot]'")
+_TSJS_INSTALL_CMD = "pip install 'pywrit[polyglot]'"
+
+
+def _tsjs_missing_extra_block(n_files):
+    """Prominent block for the no-polyglot-extra state: TS/JS files were
+    collected but none were scanned, so zero TS/JS findings is a coverage
+    gap, not a clean result. Printed in both the normal and --score paths,
+    always before the GitHub App line (which stays last)."""
+    bar = "  " + "-" * 64
+    return [
+        bar,
+        "  WARNING: %d TS/JS file(s) were seen but none were scanned."
+        % n_files,
+        "  The polyglot extra is not installed, so this report covers",
+        "  Python only. Zero TS/JS findings is a coverage gap, not a",
+        "  clean result.",
+        "  Install it with: " + _TSJS_INSTALL_CMD,
+        bar,
+    ]
 _TSJS_WRITE_METHODS = {"post", "put", "patch", "delete"}
 _TSJS_SQL_WRITE = _re.compile(
     r"^\s*\(*\s*(insert|update|delete|drop|alter|truncate|create|replace|"
@@ -1456,6 +1483,16 @@ def print_scan_json(root, files, skipped, sites, gated_funcs, tsjs, ts_sites):
     }
     ts_suppressed = tsjs.get("suppressed") or {}
     ts_sup_total = _tsjs_suppressed_total(ts_suppressed)
+    if tsjs.get("missing_extra") and tsjs.get("files"):
+        # The extra is missing: TS/JS files were collected but none were
+        # scanned. Machine consumers get the same state the text report
+        # shouts about, instead of a bare tsjs_hint flag.
+        doc["tsjs_not_scanned"] = {
+            "reason": "missing_extra",
+            "extra": "pywrit[polyglot]",
+            "files": len(tsjs["files"]),
+            "install_command": _TSJS_INSTALL_CMD,
+        }
     if ts_sup_total:
         # Non-product findings held back by default: never dropped
         # silently — the report names every suppressed path.
@@ -1633,7 +1670,12 @@ def scan_cmd(args):
         return 0
 
     if args.score:
-        print_score_report(root, sites, gated_funcs)
+        unscanned = len(tsjs["files"]) if tsjs["missing_extra"] else 0
+        print_score_report(root, sites, gated_funcs,
+                           unscanned_tsjs=unscanned)
+        if tsjs["missing_extra"]:
+            for line in _tsjs_missing_extra_block(len(tsjs["files"])):
+                print(line)
         print(_GITHUB_APP_LINE)
         return 0
 
@@ -1642,7 +1684,8 @@ def scan_cmd(args):
     print("  write sites: %d in %d function(s)" % (total, len(by_func)))
     print("  gated: %d/%d (%d%%)" % (gated_site_count, total, pct))
     if tsjs["missing_extra"]:
-        print("  " + _TSJS_HINT % len(tsjs["files"]))
+        for line in _tsjs_missing_extra_block(len(tsjs["files"])):
+            print(line)
     elif tsjs["files"]:
         ts_total = len(ts_sites)
         print("  ts/js files scanned: %d  skipped: %d  (scan only, no --apply)"
@@ -1675,7 +1718,9 @@ def scan_cmd(args):
         for vname in sorted(verbs):
             print("    %s" % vname)
 
-    print_score_report(root, sites, gated_funcs)
+    print_score_report(root, sites, gated_funcs,
+                         unscanned_tsjs=len(tsjs["files"])
+                         if tsjs["missing_extra"] else 0)
 
     if verbs:
         ppath = _pathlib.Path(args.policy_out)
