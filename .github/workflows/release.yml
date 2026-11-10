@@ -129,10 +129,13 @@ jobs:
         env:
           MCP_VERSION: ${{ steps.mcp-version.outputs.version }}
         run: |
-          CURRENT=$(curl -s "https://registry.modelcontextprotocol.io/v0/servers?search=io.github.withwrit/writ" \
-            | python3 -c "import json,sys; d=json.load(sys.stdin); print(next((s['server']['version'] for s in d.get('servers',[]) if s['server']['name']=='io.github.withwrit/writ'), ''))")
-          echo "registry currently serves: ${CURRENT:-<none>}; this release would publish: $MCP_VERSION"
-          if [ "$CURRENT" = "$MCP_VERSION" ]; then
+          # Use the versions endpoint (authoritative, lists every version).
+          # The search endpoint returns versions in arbitrary order with a
+          # stale version first, which made this check miss 0.2.0 and then
+          # fail on a duplicate publish (fixed 2026-11-10).
+          VERSIONS=$(curl -s "https://registry.modelcontextprotocol.io/v0/servers/io.github.withwrit%2Fwrit/versions")
+          echo "$VERSIONS" | python3 -c "import json,sys; d=json.load(sys.stdin); print('registry versions:', [s['server']['version'] for s in d.get('servers',[])])"
+          if echo "$VERSIONS" | python3 -c "import json,sys,os; d=json.load(sys.stdin); vs=[s['server']['version'] for s in d.get('servers',[]) if s['server']['name']=='io.github.withwrit/writ']; sys.exit(0 if os.environ['MCP_VERSION'] in vs else 1)"; then
             echo "already_published=true" >> "$GITHUB_OUTPUT"
           else
             echo "already_published=false" >> "$GITHUB_OUTPUT"
@@ -142,7 +145,16 @@ jobs:
         if: steps.registry-check.outputs.already_published != 'true'
         run: |
           mcp-publisher login github-oidc
-          mcp-publisher publish server.json
+          set +e
+          OUTPUT=$(mcp-publisher publish server.json 2>&1)
+          STATUS=$?
+          set -e
+          echo "$OUTPUT"
+          if [ "$STATUS" -ne 0 ] && echo "$OUTPUT" | grep -qi "duplicate"; then
+            echo "Registry reports this version is already published; treating as success."
+            exit 0
+          fi
+          exit "$STATUS"
 
   github-release:
     # Create the GitHub Release object for the tag. The repo's /releases page
