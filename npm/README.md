@@ -70,8 +70,8 @@ Debug the shim itself with `npx writ-scan --writ-shim-info`.
 
 ## Versioning
 
-`writ-scan` versions track `pywrit` releases one-to-one: `writ-scan@0.2.13`
-wraps `pywrit==0.2.13`.
+`writ-scan` versions track `pywrit` releases one-to-one: `writ-scan@0.2.14`
+wraps `pywrit==0.2.14`.
 
 ## Docs
 
