@@ -660,14 +660,21 @@ def _writ_score(rows):
     return max(0, 100 - penalty)
 
 
-def print_score_report(root, sites, gated_funcs, unscanned_tsjs=0):
+def print_score_report(root, sites, gated_funcs, unscanned_tsjs=0,
+                       polyglot_sites=0):
     """Print the risk report and Writ Score. Pure read-only: no files written.
 
-    unscanned_tsjs counts TS/JS files that were collected but never
-    scanned (polyglot extra missing). When it is nonzero and no Python
-    write was found, the verdict says so: "No write operations
-    discovered" on its own would read as a clean result for a repo the
-    scanner only half saw.
+    unscanned_tsjs counts polyglot files (TS/JS and Go) that were
+    collected but never scanned (polyglot extra missing). When it is
+    nonzero and no Python write was found, the verdict says so: "No write
+    operations discovered" on its own would read as a clean result for a
+    repo the scanner only half saw.
+
+    polyglot_sites counts listed TS/JS and Go write sites. The score and
+    the verdict grade Python writes only, so when polyglot sites exist
+    and no Python write was found, the bare verdict must not stand
+    either: it reads as if the repo had no writes at all. It is qualified
+    to Python instead.
     """
     rows = _score_report_rows(root, sites, gated_funcs)
     total = len(rows)
@@ -686,6 +693,8 @@ def print_score_report(root, sites, gated_funcs, unscanned_tsjs=0):
     if not total:
         if unscanned_tsjs:
             print("No write operations discovered in the files that were scanned.")
+        elif polyglot_sites:
+            print("No Python write operations discovered.")
         else:
             print("No write operations discovered.")
         print()
@@ -837,7 +846,8 @@ def _apply_edits(lines, edits):
 # writ scan, TypeScript/JavaScript: deterministic and scan-only (TS/JS files
 # are never rewritten). Parsing needs the optional extra
 # `pip install 'pywrit[polyglot]'` (tree-sitter); without it the scanner
-# prints a one-line hint and keeps going. Rules are data (_TSJS_RULES) so
+# prints a prominent warning block and keeps going (Go files ride the same
+# extra and the same block; see the Go tier below). Rules are data (_TSJS_RULES) so
 # other languages can reuse the same (id, kind, callee patterns, condition)
 # shape.
 # ---------------------------------------------------------------------------
@@ -900,18 +910,33 @@ def _tsjs_suppressed_total(suppressed):
 _TSJS_INSTALL_CMD = "pip install 'pywrit[polyglot]'"
 
 
-def _tsjs_missing_extra_block(n_files):
-    """Prominent block for the no-polyglot-extra state: TS/JS files were
-    collected but none were scanned, so zero TS/JS findings is a coverage
-    gap, not a clean result. Printed in both the normal and --score paths,
-    always before the GitHub App line (which stays last)."""
+def _tsjs_missing_extra_block(n_files, n_go_files=0):
+    """Prominent block for the no-polyglot-extra state: TS/JS (and Go)
+    files were collected but none were scanned, so zero polyglot findings
+    is a coverage gap, not a clean result. Printed in both the normal and
+    --score paths, always before the GitHub App line (which stays last).
+
+    The Go count rides the same block so a Go-only repo without the extra
+    shows its files went unscanned, so the block never reads as though zero
+    Go findings meant a clean result."""
     bar = "  " + "-" * 64
+    if n_files and n_go_files:
+        seen = "  WARNING: %d TS/JS file(s) and %d Go file(s) were seen " \
+               "but none were scanned." % (n_files, n_go_files)
+        covered = "  Python only. Zero TS/JS or Go findings is a coverage gap, not a"
+    elif n_go_files:
+        seen = "  WARNING: %d Go file(s) were seen but none were scanned." \
+               % n_go_files
+        covered = "  Python only. Zero Go findings is a coverage gap, not a"
+    else:
+        seen = "  WARNING: %d TS/JS file(s) were seen but none were scanned." \
+               % n_files
+        covered = "  Python only. Zero TS/JS findings is a coverage gap, not a"
     return [
         bar,
-        "  WARNING: %d TS/JS file(s) were seen but none were scanned."
-        % n_files,
+        seen,
         "  The polyglot extra is not installed, so this report covers",
-        "  Python only. Zero TS/JS findings is a coverage gap, not a",
+        covered,
         "  clean result.",
         "  Install it with: " + _TSJS_INSTALL_CMD,
         bar,
@@ -1370,6 +1395,379 @@ def _tsjs_scan_source(src, filename, parser):
     return sites, gated
 
 
+# writ scan, Go (slice 1): deterministic and scan-only (Go files are never
+# rewritten). Same tree-sitter tier as TS/JS, same `pywrit[polyglot]`
+# extra plus the tree-sitter-go grammar; without the extra the
+# missing-extra block counts Go files too. Slice 1 covers one write
+# family, deliberately: database/sql Exec/ExecContext on a db/tx handle,
+# GORM-shaped Create/Save/Update/Updates/Delete on a db handle, HTTP
+# client writes (Post/Put/Patch/Delete calls and NewRequest(-WithContext)
+# with a write method), and generated-client resource methods of the
+# stripe-go shape (<client>.<Resource>.<New|Update|Delete|Create> with an
+# uppercase middle segment). Wider Go coverage (os/io/fs writes, sqlx,
+# raw-SQL conditions on Exec, non-stripe generated-client shapes,
+# Go-specific non-product suppression classes) ships in later slices.
+# ---------------------------------------------------------------------------
+
+_GO_MAX_BYTES = 1000000  # larger files are almost always generated
+_GO_TEST_DIRS = {"tests", "testing"}
+
+# chain[0] in one of these keeps its case: the selector names a package,
+# not a variable. Package roots are package-level rules' anchor;
+# everything else (db, tx, client, receiver fields like r.db) lowercases,
+# so a variable or field never collides with a package- or
+# resource-segment rule.
+_GO_PKG_ROOTS = {"http", "sql", "gorm"}
+
+# Classifier noise guards. Uppercase two-segment selectors (s.Info.
+# Update) are ubiquitous in real code (structs like Params, Args, Options,
+# Config); the stripe-go generated-client shape is three segments
+# (client.Charges.New), so two-segment chains never fire the sdk rule.
+# The package-level pre-v87 shape (charge.New(params)) is NOT flagged in
+# slice 1: telling it apart from a bare constructor (paymentsvc.New)
+# needs import-aware detection, which is a later slice; see
+# tests/fixtures/go/pkgclient.go.
+_GO_STRUCTY_RES = {"params", "args", "arg", "opts", "options", "config",
+                   "conf", "cfg", "settings", "props", "attrs", "info",
+                   "meta", "metadata", "stat", "stats", "status", "flags",
+                   "defaults", "spec", "state", "data", "result", "results",
+                   "resp", "response", "req", "request", "ctx", "context",
+                   "env", "log", "msg", "message", "err", "error",
+                   "value", "values", "item", "items", "node", "list",
+                   "set", "map", "dict", "obj", "object", "doc", "self",
+                   "this", "types", "type", "kind", "id", "uid", "key",
+                   "name", "path", "url", "uri", "queue", "pool", "lock",
+                   "group", "batch", "builder", "factory", "mock", "fake",
+                   "test", "tmp", "tmpfs", "base", "core", "common",
+                   "util", "utils", "helper", "helpers", "internal"}
+
+_GO_SQL_METHODS = {"exec", "execcontext"}
+_GO_ORM_METHODS = {"create", "save", "update", "updates", "delete"}
+_GO_HTTP_VERBS = {"post", "put", "patch", "delete"}
+_GO_NEW_REQUEST = {"newrequest", "newrequestwithcontext"}
+_GO_HTTP_WRITE_METHODS = {"post", "put", "patch", "delete"}
+_GO_RESOURCE_METHODS = {"new", "update", "delete", "create"}
+# db/tx handle receivers for database/sql and GORM-shaped writes. A
+# receiver segment qualifies when it names a handle by convention: it is
+# or ends in "db"/"tx" (db, tx, gormDB, dbtx, r.db, s.tx). Function roots
+# (createUser(...)) never qualify: "user" does not end in db/tx.
+_GO_HANDLE_RX = _re.compile(r"(db|tx)$")
+
+
+class _GoFile:
+    def __init__(self, src):
+        self.src = src
+
+    def text(self, node):
+        return self.src[node.start_byte:node.end_byte].decode(
+            "utf-8", "replace")
+
+    def literal(self, node):
+        """String value of a Go interpreted/raw string literal, else None."""
+        if node is None:
+            return None
+        if node.type in ("interpreted_string_literal",
+                         "raw_string_literal"):
+            return self.text(node)[1:-1]
+        return None
+
+    def chain(self, node):
+        """Dotted callee chain, e.g. http.NewRequest -> [http, NewRequest],
+        client.Charges.New(...) -> [client, Charges, New()]. Selector
+        fields and plain identifiers only; anything else on the operand
+        side (index expressions, parenthesized values, composite-literal
+        or nested-call receivers) folds to "?" so a rule only fires on a
+        chain it fully understands."""
+        if node is None:
+            return ["?"]
+        t = node.type
+        if t == "identifier":
+            return [self.text(node)]
+        if t == "selector_expression":
+            fld = node.child_by_field_name("field")
+            return self.chain(node.child_by_field_name("operand")) + \
+                [self.text(fld) if fld is not None else "?"]
+        if t == "call_expression":
+            c = self.chain(node.child_by_field_name("function"))
+            c[-1] = c[-1] + "()"
+            return c
+        return ["?"]
+
+
+def _go_args(call):
+    args = call.child_by_field_name("arguments")
+    if args is None:
+        return []
+    return list(args.named_children)
+
+
+def _go_norm(chain):
+    """Case-drop a callee chain for matching. Chain roots that name a Go
+    package (_GO_PKG_ROOTS) keep the package name as segment 0 and
+    lowercase the selector fields; every other root (variables, receiver
+    fields) and all "()" call segments lowercase wholesale. "?" segments
+    are dropped; a chain that is only "?" matches nothing."""
+    norm = []
+    for i, c in enumerate(chain):
+        if c == "?":
+            continue
+        if i == 0 and c in _GO_PKG_ROOTS:
+            norm.append(c)
+        else:
+            norm.append(c.lower().rstrip("()") if c.endswith("()")
+                        else c.lower())
+    return norm
+
+
+def _go_write_method(call, f, idx):
+    """arg[idx] of a NewRequest call is a write method: either a string
+    literal ("POST") or an http.MethodX constant (http.MethodPost).
+    Variables and http.MethodGet/Head are reads, not flagged."""
+    args = _go_args(call)
+    if len(args) <= idx:
+        return False
+    a = args[idx]
+    lit = f.literal(a)
+    if lit is not None:
+        return lit.strip().lower() in _GO_HTTP_WRITE_METHODS
+    ac = _go_norm(f.chain(a))
+    return len(ac) == 2 and ac[0] == "http" and \
+        ac[1].startswith("method") and \
+        ac[1][len("method"):] in _GO_HTTP_WRITE_METHODS
+
+
+def _go_classify(call, chain, f, pkg_paths=None):
+    """First match wins; returns (rule_id, kind). Slice-1 family only.
+
+    `chain` is the raw (un-lowercased) callee chain. Handle receivers
+    match by convention on any receiver segment (db, tx, gormDB, r.db,
+    s.client); package roots match only through _GO_PKG_ROOTS or the
+    file's imports, so a variable or field never trips a package-level
+    pattern, and a bare `svc.New(...)` constructor never matches the
+    generated-client rule (its resource segment must pass the shape
+    checks below)."""
+    norm = _go_norm(chain)
+    if not norm:
+        return None
+    tail = norm[-1]
+    recv = norm[:-1]
+    is_pkg_root = chain[0] in _GO_PKG_ROOTS or \
+        (pkg_paths is not None and chain[0] in pkg_paths)
+    if not is_pkg_root and recv and \
+            any(_GO_HANDLE_RX.search(c) for c in recv):
+        if tail in _GO_SQL_METHODS:
+            # database/sql: db.Exec / db.ExecContext, tx.Exec, r.db.Exec
+            return "go-db-write", "db"
+        if tail in _GO_ORM_METHODS:
+            # GORM shape: db.Create / Save / Update / Updates / Delete
+            return "go-orm-write", "db"
+    if tail in _GO_HTTP_VERBS:
+        if norm[0] == "http" and len(norm) == 2:
+            # package-level http.Post / Put / Patch / Delete
+            return "go-http-client-write", "http"
+        if not is_pkg_root and recv and \
+                any(c == "client" or c.endswith("client") for c in recv):
+            # client.Post / s.client.Delete on an HTTP client handle
+            return "go-http-client-write", "http"
+    if tail in _GO_NEW_REQUEST and norm[0] == "http" and len(norm) == 2:
+        idx = 0 if tail == "newrequest" else 1
+        if _go_write_method(call, f, idx):
+            return "go-http-request-write", "http"
+    if tail in _GO_RESOURCE_METHODS and len(chain) >= 3:
+        mid, mid_norm = chain[-2], norm[-2]
+        if mid != "?" and mid_norm not in _GO_STRUCTY_RES:
+            if mid[0].isupper():
+                # generated client, stripe-go shape: <recv>.<Resource>.
+                # <New|Update|Delete|Create>(...) with an uppercase
+                # Resource segment; a bare `svc.New(...)` constructor has
+                # only two segments and never matches. The package-level
+                # pre-v87 shape (charge.New) is a later slice, not this
+                # branch: two-segment chains never reach it.
+                return "go-sdk-write", "sdk"
+    return None
+
+
+def _go_func_name(node, f):
+    name = node.child_by_field_name("name")
+    return f.text(name) if name is not None else None
+
+
+def _go_method_receiver(node, f):
+    recv = node.child_by_field_name("receiver")
+    if recv is None:
+        return None
+    for decl in recv.named_children:
+        typ = decl.child_by_field_name("type")
+        while typ is not None and typ.type == "pointer_type":
+            typ = typ.child_by_field_name("type")
+        if typ is not None:
+            return f.text(typ)
+    return None
+
+
+def _go_record_import(node, f, pkg_paths):
+    """Local package name -> import path. Unnamed imports default to the
+    last path segment (github.com/foo/bar -> bar), like the compiler."""
+    path_node = node.child_by_field_name("path")
+    path = f.literal(path_node)
+    if not path:
+        return
+    name_node = node.child_by_field_name("name")
+    name = f.text(name_node) if name_node is not None else \
+        path.rstrip("/").rsplit("/", 1)[-1]
+    if name in ("_", "."):
+        return
+    pkg_paths[name] = path
+
+
+def _go_scan_source(src, filename, parser):
+    """Go twin of _tsjs_scan_source: (sites, gated) where sites =
+    [(_WriteSite, rule_id, fkey)] and gated = {(func_name, func_line)}.
+    Module-level (package-level) writes use func ""."""
+    f = _GoFile(src)
+    tree = parser.parse(src)
+    pkg_paths = {}
+    calls, gated = [], set()
+    stack = [(tree.root_node, ("", 0), "")]
+    while stack:
+        node, fkey, cls = stack.pop()
+        t = node.type
+        if t in ("function_declaration", "method_declaration",
+                 "func_literal"):
+            name = _go_func_name(node, f) if t != "func_literal" else None
+            recv = None
+            if t == "method_declaration":
+                recv = _go_method_receiver(node, f)
+                if recv:
+                    cls = recv
+            if name:
+                fkey = (name, node.start_point[0] + 1)
+        elif t == "import_spec":
+            _go_record_import(node, f, pkg_paths)
+        elif t == "call_expression":
+            calls.append((node, fkey, cls))
+        stack.extend((c, fkey, cls) for c in reversed(node.children))
+    sites = []
+    for node, fkey, cls in calls:
+        raw = f.chain(node.child_by_field_name("function"))
+        if any(c == "?" for c in raw[:-1]):
+            continue  # opaque receiver: index/composite/nested-call
+        if not raw or raw[-1] == "?":
+            continue
+        hit = _go_classify(node, raw, f, pkg_paths)
+        if hit:
+            snippet = " ".join(f.text(node).split())[:100]
+            sites.append((_WriteSite(filename, fkey[0], cls,
+                                     node.start_point[0] + 1, hit[1],
+                                     snippet),
+                          hit[0], fkey))
+    return sites, gated
+
+
+def _go_verb(rel, func_name, cls_name, kind):
+    """infer_verb for Go: CamelCase names, `payments/refunds.go` ->
+    payments. A leading snake_case verb prefix (createUser -> create)
+    still lands through _infer_action after camel splitting."""
+    snake = _re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", func_name)
+    base = rel.with_name(rel.name.split(".")[0] + rel.suffix)
+    return infer_verb(base, snake, cls_name, kind)
+
+
+def _go_parsers():
+    """Return {"go": Parser}, or {} when the polyglot extra or the
+    tree-sitter-go grammar is missing."""
+    try:
+        import tree_sitter as ts
+    except ImportError:
+        return {}
+    try:
+        try:
+            import tree_sitter_go as tsg
+            fn = tsg.language
+        except ImportError:
+            from tree_sitter_language_pack import get_language
+            fn = lambda: get_language("go")
+    except ImportError:
+        return {}
+    try:
+        lang = fn()
+        if not isinstance(lang, ts.Language):
+            lang = ts.Language(lang)
+        try:
+            parser = ts.Parser(lang)
+        except TypeError:
+            parser = ts.Parser()
+            parser.language = lang
+    except Exception:
+        return {}
+    return {"go": parser}
+
+
+def _go_should_skip(path, root, excludes):
+    rel = path.relative_to(root)
+    if any(p in _TSJS_SKIP_DIR_NAMES or p.startswith(".")
+           for p in rel.parts[:-1]):
+        return True
+    if any(p in _GO_TEST_DIRS for p in rel.parts[:-1]):
+        return True
+    if path.name.endswith("_test.go"):
+        return True
+    s = str(path)
+    return any(e in s for e in excludes)
+
+
+def _go_collect_files(root, excludes):
+    """Same git-aware walk as TS/JS (tracked + untracked-not-ignored, or
+    os.walk with the same skip dirs), minus test files and vendor/ trees
+    (vendor/ is already in _TSJS_SKIP_DIR_NAMES)."""
+    rels = _tsjs_git_files(root)
+    if rels is None:
+        rels = []
+        for dp, dns, fns in os.walk(str(root)):
+            dns[:] = [d for d in dns if d not in _TSJS_SKIP_DIR_NAMES
+                      and not d.startswith(".")]
+            rels.extend(os.path.relpath(os.path.join(dp, f), str(root))
+                        for f in fns)
+    out = set()
+    for r in rels:
+        p = root / r
+        if p.suffix == ".go" and not _go_should_skip(p, root, excludes) \
+                and p.is_file():
+            out.add(p)
+    return sorted(out)
+
+
+def _go_scan(root, excludes):
+    """Return dict with files, skipped, sites, gated, missing_extra.
+    Never raises on a bad file: a Go file that fails to parse is skipped,
+    never fatal. Go findings are always reported (no non-product
+    suppression classes in slice 1; the go JSON object carries
+    `suppressed` only when a later slice adds them)."""
+    files = _go_collect_files(root, excludes)
+    res = {"files": files, "skipped": [], "sites": [], "gated": set(),
+           "missing_extra": False}
+    if not files:
+        return res
+    parsers = _go_parsers()
+    if not parsers:
+        res["missing_extra"] = True
+        return res
+    for path in files:
+        try:
+            if path.stat().st_size > _GO_MAX_BYTES:
+                res["skipped"].append(str(path))
+                continue
+            src = path.read_bytes()
+            sites, gated = _go_scan_source(src, str(path), parsers["go"])
+        except Exception:
+            res["skipped"].append(str(path))
+            continue
+        res["sites"].extend(sites)
+        res["gated"].update((str(path),) + g for g in gated)
+    return res
+
+
+
 def _tsjs_verb(rel, func_name, cls_name, kind):
     """infer_verb for TS/JS: camelCase names, `orders.service.ts` -> orders."""
     snake = _re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", func_name)
@@ -1424,7 +1822,8 @@ def _tsjs_scan(root, excludes, include_non_product=False):
 _RISK_ORDER = {"high": 0, "medium": 1, "low": 2}
 
 
-def _scan_findings_json(root, sites, gated_funcs, tsjs, ts_sites):
+def _scan_findings_json(root, sites, gated_funcs, tsjs, ts_sites,
+                        go=None, go_sites=None):
     """Return the findings list for `writ scan --format json`.
 
     Each finding is a dict with file (repo-relative, posix), line, function,
@@ -1459,27 +1858,47 @@ def _scan_findings_json(root, sites, gated_funcs, tsjs, ts_sites):
             "language": "tsjs",
             "snippet": (s.snippet or "")[:200],
         })
+    for s, _rid, fkey in (go_sites or []):
+        rel = _pathlib.Path(s.file).relative_to(root)
+        verb = _go_verb(rel, fkey[0], s.cls, s.kind)
+        findings.append({
+            "file": rel.as_posix(),
+            "line": s.lineno,
+            "function": fkey[0] or "<module>",
+            "verb": verb,
+            "risk": _risk_tier(verb),
+            "gated": (s.file,) + fkey in (go or {}).get("gated", set()),
+            "kind": s.kind,
+            "language": "go",
+            "snippet": (s.snippet or "")[:200],
+        })
     findings.sort(key=lambda f: (_RISK_ORDER[f["risk"]], f["file"], f["line"]))
     return findings
 
 
-def print_scan_json(root, files, skipped, sites, gated_funcs, tsjs, ts_sites):
+def print_scan_json(root, files, skipped, sites, gated_funcs, tsjs, ts_sites,
+                    go=None, go_sites=None):
     """Print the machine-readable scan report. Read-only: no files written."""
     from . import __version__
+    go = go or {"files": [], "skipped": [], "missing_extra": False}
+    go_sites = go_sites or []
     doc = {
         "scanner": "pywrit",
         "version": __version__,
         "root": str(root),
-        "files_scanned": len(files) + len(tsjs.get("files", [])),
-        "files_skipped": len(skipped) + len(tsjs.get("skipped", [])),
+        "files_scanned": len(files) + len(tsjs.get("files", []))
+        + len(go.get("files", [])),
+        "files_skipped": len(skipped) + len(tsjs.get("skipped", []))
+        + len(go.get("skipped", [])),
         "tsjs_hint": bool(tsjs.get("missing_extra")),
+        "go_hint": bool(go.get("missing_extra")),
         "github_app": {
             "install_url": _GITHUB_APP_INSTALL_URL,
             "docs_url": _GITHUB_APP_DOCS_URL,
             "note": _GITHUB_APP_NOTE,
         },
         "findings": _scan_findings_json(root, sites, gated_funcs, tsjs,
-                                        ts_sites),
+                                        ts_sites, go, go_sites),
     }
     ts_suppressed = tsjs.get("suppressed") or {}
     ts_sup_total = _tsjs_suppressed_total(ts_suppressed)
@@ -1505,13 +1924,23 @@ def print_scan_json(root, files, skipped, sites, gated_funcs, tsjs, ts_sites):
                 for c in ts_suppressed.values()
                 for f in c["files"]),
         }
+    if go.get("missing_extra") and go.get("files"):
+        # The extra is missing: Go files were collected but none were
+        # scanned. Machine consumers get the same state the text report
+        # shouts about, instead of a bare go_hint flag.
+        doc["go_not_scanned"] = {
+            "reason": "missing_extra",
+            "extra": "pywrit[polyglot]",
+            "files": len(go["files"]),
+            "install_command": _TSJS_INSTALL_CMD,
+        }
     print(json.dumps(doc, indent=2))
 
 
 def _scan_repo(root, excludes, include_non_product=False):
-    """Collect Python and TS/JS files and find write sites.
+    """Collect Python, TS/JS, and Go files and find write sites.
 
-    Returns (files, skipped, sites, gated, tsjs). This is the read-only
+    Returns (files, skipped, sites, gated, tsjs, go). This is the read-only
     detection pass reused by both `writ scan` and `writ wrap`.
     """
     files = _collect_files(root, excludes or [])
@@ -1534,15 +1963,25 @@ def _scan_repo(root, excludes, include_non_product=False):
 
     tsjs = _tsjs_scan(root, excludes or [],
                       include_non_product=include_non_product)
-    return files, skipped, sites, gated, tsjs
+    go = _go_scan(root, excludes or [])
+    return files, skipped, sites, gated, tsjs, go
 
 
-def _analyze_scan(root, files, skipped, sites, gated, tsjs):
+def _analyze_scan(root, files, skipped, sites, gated, tsjs, go=None):
     """Derive counts, the verb map, and gated totals from a scan.
 
     Returns a dict with everything scan_cmd and wrap_cmd need to print
     reports, build diffs, and write policy.
     """
+    go = go if go is not None else {"files": [], "skipped": [], "sites": [],
+                                    "gated": set(), "missing_extra": False}
+    go_sites = go["sites"]
+    go_by_func = {}
+    for s, _rid, fkey in go_sites:
+        go_by_func.setdefault((s.file,) + fkey, []).append(s)
+    go_gated = sum(1 for s, _rid, fkey in go_sites
+                   if (s.file,) + fkey in go["gated"])
+
     ts_sites = tsjs["sites"]
     ts_by_func = {}
     for s, _rid, fkey in ts_sites:
@@ -1567,6 +2006,10 @@ def _analyze_scan(root, files, skipped, sites, gated, tsjs):
         rel = _pathlib.Path(f).relative_to(root)
         verbs.setdefault(_tsjs_verb(rel, func_name, ss[0].cls, ss[0].kind),
                          "require_grant")
+    for (f, func_name, _ln), ss in sorted(go_by_func.items()):
+        rel = _pathlib.Path(f).relative_to(root)
+        verbs.setdefault(_go_verb(rel, func_name, ss[0].cls, ss[0].kind),
+                         "require_grant")
 
     return {
         "files": files,
@@ -1577,6 +2020,10 @@ def _analyze_scan(root, files, skipped, sites, gated, tsjs):
         "ts_sites": ts_sites,
         "ts_by_func": ts_by_func,
         "ts_gated": ts_gated,
+        "go": go,
+        "go_sites": go_sites,
+        "go_by_func": go_by_func,
+        "go_gated": go_gated,
         "by_func": by_func,
         "gated_funcs": gated_funcs,
         "gated_site_count": gated_site_count,
@@ -1647,10 +2094,10 @@ def scan_cmd(args):
         print("error: not a directory: %s" % args.path, file=sys.stderr)
         return 2
 
-    files, skipped, sites, gated, tsjs = _scan_repo(
+    files, skipped, sites, gated, tsjs, go = _scan_repo(
         root, args.exclude or [],
         include_non_product=getattr(args, "include_non_product", False))
-    analysis = _analyze_scan(root, files, skipped, sites, gated, tsjs)
+    analysis = _analyze_scan(root, files, skipped, sites, gated, tsjs, go)
     by_func = analysis["by_func"]
     ts_by_func = analysis["ts_by_func"]
     gated_funcs = analysis["gated_funcs"]
@@ -1660,21 +2107,29 @@ def scan_cmd(args):
     ts_gated = analysis["ts_gated"]
     tsjs = analysis["tsjs"]
     ts_sites = analysis["ts_sites"]
+    go = analysis["go"]
+    go_sites = analysis["go_sites"]
+    go_by_func = analysis["go_by_func"]
+    go_gated = analysis["go_gated"]
     verbs = analysis["verbs"]
 
     if getattr(args, "format", "text") == "json":
         # Machine-readable risk report for CI. Read-only: no policy file,
         # no diffs, no prompts.
         print_scan_json(root, files, skipped, sites, gated_funcs, tsjs,
-                        ts_sites)
+                        ts_sites, go, go_sites)
         return 0
 
+    unscanned_polyglot = (len(tsjs["files"]) if tsjs["missing_extra"] else 0) \
+        + (len(go["files"]) if go["missing_extra"] else 0)
     if args.score:
-        unscanned = len(tsjs["files"]) if tsjs["missing_extra"] else 0
         print_score_report(root, sites, gated_funcs,
-                           unscanned_tsjs=unscanned)
-        if tsjs["missing_extra"]:
-            for line in _tsjs_missing_extra_block(len(tsjs["files"])):
+                           unscanned_tsjs=unscanned_polyglot,
+                           polyglot_sites=len(ts_sites) + len(go_sites))
+        if tsjs["missing_extra"] or go["missing_extra"]:
+            for line in _tsjs_missing_extra_block(
+                    len(tsjs["files"]) if tsjs["missing_extra"] else 0,
+                    len(go["files"]) if go["missing_extra"] else 0):
                 print(line)
         print(_GITHUB_APP_LINE)
         return 0
@@ -1683,10 +2138,12 @@ def scan_cmd(args):
     print("  files scanned: %d  skipped: %d" % (len(files), len(skipped)))
     print("  write sites: %d in %d function(s)" % (total, len(by_func)))
     print("  gated: %d/%d (%d%%)" % (gated_site_count, total, pct))
-    if tsjs["missing_extra"]:
-        for line in _tsjs_missing_extra_block(len(tsjs["files"])):
+    if tsjs["missing_extra"] or go["missing_extra"]:
+        for line in _tsjs_missing_extra_block(
+                len(tsjs["files"]) if tsjs["missing_extra"] else 0,
+                len(go["files"]) if go["missing_extra"] else 0):
             print(line)
-    elif tsjs["files"]:
+    if not tsjs["missing_extra"] and tsjs["files"]:
         ts_total = len(ts_sites)
         print("  ts/js files scanned: %d  skipped: %d  (scan only, no --apply)"
               % (len(tsjs["files"]), len(tsjs["skipped"])))
@@ -1713,14 +2170,28 @@ def scan_cmd(args):
                     print("    suppressed %s: %d site(s) [%s]" % (
                         _pathlib.Path(f).relative_to(root),
                         suppressed[cls]["files"][f], cls))
+    if not go["missing_extra"] and go["files"]:
+        go_total = len(go_sites)
+        print("  go files scanned: %d  skipped: %d  (scan only, no --apply)"
+              % (len(go["files"]), len(go["skipped"])))
+        print("  go write sites: %d in %d function(s)"
+              % (go_total, len(go_by_func)))
+        print("  go gated: %d/%d (%d%%)" % (
+            go_gated, go_total,
+            (100 * go_gated // go_total) if go_total else 100))
+        for s, rid, _fkey in sorted(go_sites, key=lambda x: (x[0].file,
+                                                             x[0].lineno)):
+            print("    %s:%d [%s] %s %s(): %s" % (
+                _pathlib.Path(s.file).relative_to(root), s.lineno, s.kind,
+                rid, s.func or "<module>", s.snippet))
     if verbs:
         print("  verbs discovered: %d" % len(verbs))
         for vname in sorted(verbs):
             print("    %s" % vname)
 
     print_score_report(root, sites, gated_funcs,
-                         unscanned_tsjs=len(tsjs["files"])
-                         if tsjs["missing_extra"] else 0)
+                       unscanned_tsjs=unscanned_polyglot,
+                       polyglot_sites=len(ts_sites) + len(go_sites))
 
     if verbs:
         ppath = _pathlib.Path(args.policy_out)
@@ -1734,8 +2205,14 @@ def scan_cmd(args):
         print("  manual: %s %s() [%s]: %s" % (path, func_name, verb, why))
 
     if not results:
-        if ts_sites:
+        if ts_sites and go_sites:
+            print("nothing to instrument (ts/js and go findings are "
+                  "scan-only; gate them by hand).")
+        elif ts_sites:
             print("nothing to instrument (ts/js findings are scan-only; "
+                  "gate them by hand).")
+        elif go_sites:
+            print("nothing to instrument (go findings are scan-only; "
                   "gate them by hand).")
         else:
             print("nothing to instrument.")
@@ -1779,12 +2256,13 @@ def wrap_cmd(args):
         return 2
 
     # 1. Scan the repo.
-    files, skipped, sites, gated, tsjs = _scan_repo(root, args.exclude or [])
-    analysis = _analyze_scan(root, files, skipped, sites, gated, tsjs)
+    files, skipped, sites, gated, tsjs, go = _scan_repo(root, args.exclude or [])
+    analysis = _analyze_scan(root, files, skipped, sites, gated, tsjs, go)
     gated_funcs = analysis["gated_funcs"]
     gated_site_count_before = analysis["gated_site_count"]
     total_before = analysis["total"]
     ts_sites = analysis["ts_sites"]
+    go_sites = analysis["go_sites"]
     verbs = analysis["verbs"]
 
     # 2. Print the risk report summary.
@@ -1817,8 +2295,14 @@ def wrap_cmd(args):
         root, sites, gated, gated_funcs)
 
     if not results:
-        if ts_sites:
+        if ts_sites and go_sites:
+            print("nothing to wrap (ts/js and go findings are scan-only; "
+                  "gate them by hand).")
+        elif ts_sites:
             print("nothing to wrap (ts/js findings are scan-only; "
+                  "gate them by hand).")
+        elif go_sites:
+            print("nothing to wrap (go findings are scan-only; "
                   "gate them by hand).")
         else:
             print("nothing to wrap.")
@@ -1894,9 +2378,9 @@ def wrap_cmd(args):
         return 2
 
     # 7. Re-scan and report coverage (before/after gated-site counts).
-    _files2, _skipped2, sites2, gated2, tsjs2 = _scan_repo(
+    _files2, _skipped2, sites2, gated2, tsjs2, go2 = _scan_repo(
         root, args.exclude or [])
-    analysis2 = _analyze_scan(root, _files2, _skipped2, sites2, gated2, tsjs2)
+    analysis2 = _analyze_scan(root, _files2, _skipped2, sites2, gated2, tsjs2, go2)
     print("wrapped %d gate(s) in %d file(s)."
           % (total_gates, len(results)))
     print("coverage: %d/%d -> %d/%d writes gated"
