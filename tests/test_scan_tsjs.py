@@ -127,6 +127,21 @@ class FixtureRulesTest(unittest.TestCase):
         self.assertIn("nothing to instrument (ts/js findings are scan-only", out)
 
     @unittest.skipUnless(HAVE_EXTRA, "polyglot extra not installed")
+    def test_verdict_qualified_when_tsjs_sites_exist(self):
+        # The score verdict grades Python writes only. With TS/JS sites
+        # found and no Python write, the bare "No write operations
+        # discovered." must not stand: it reads as if the repo had no
+        # writes at all. Same rule as the Go case.
+        with tempfile.TemporaryDirectory() as td:
+            root = _copy_fixtures(pathlib.Path(td) / "repo")
+            code, out = _run_scan(root)
+        self.assertEqual(code, 0)
+        self.assertIn("No Python write operations discovered.", out)
+        self.assertNotIn("\nNo write operations discovered.\n", out)
+        lines = [ln for ln in out.splitlines() if ln.strip()]
+        self.assertEqual(lines[-1], GitHubAppLineTest.LINE)
+
+    @unittest.skipUnless(HAVE_EXTRA, "polyglot extra not installed")
     def test_apply_never_rewrites_tsjs_but_still_gates_python(self):
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td) / "repo"
