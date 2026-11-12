@@ -23,7 +23,11 @@ purpose are known.
    a different or changed write.
 3. Proceed only if token verification confirms the authorization. Never bypass
    the check by using another write path or by restating the purpose without a
-   new check.
+   new check. For a write to a vaulted upstream system (`stripe`, `github`,
+   `salesforce`), convert the ALLOW token with `writ_lease` and run it with
+   `writ_execute` using the same method, path, and body; the lease is
+   single-use and bound to that exact request, and on any mismatch the gate
+   fails closed with no upstream call.
 4. On `DENY`, do not execute or retry the write. Report the denial and its
    reason to the human.
 5. On `STEP_UP`, pause the write and surface the exact action to the human for

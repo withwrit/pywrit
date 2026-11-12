@@ -8,14 +8,14 @@
     "source": "github",
     "subfolder": "mcp"
   },
-  "version": "0.2.0",
+  "version": "0.2.1",
   "websiteUrl": "https://withwrit.com",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "writ-mcp",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

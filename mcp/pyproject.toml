@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "writ-mcp"
-version = "0.2.0"
+version = "0.2.1"
 description = "Writ MCP server: point-of-action policy checks for AI agent writes (ALLOW/DENY/STEP_UP) with a tamper-evident audit log"
 readme = "README.md"
 license = "MIT"

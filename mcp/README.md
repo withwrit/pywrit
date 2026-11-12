@@ -73,6 +73,11 @@ The tool descriptions teach the agent this flow, but the short version:
    executing, to prove the authorization still matches what you're doing.
 4. `DENY` → do not proceed. `STEP_UP` → a human sponsor approves
    (via `writ_grant` or the dashboard), then check again.
+5. `writ_lease(auth_token, system_id, method, path, body)` - convert the ALLOW
+   token into a single-use lease bound to the exact upstream request.
+6. `writ_execute(lease_id, method, path, body)` - run the gated write with the
+   same method/path/body; the gate forwards it with the vaulted credential and
+   returns the upstream response verbatim.
 
 ## Tools
 
@@ -80,6 +85,8 @@ The tool descriptions teach the agent this flow, but the short version:
 |---|---|---|
 | `writ_check` | agent | Decision + 90s purpose-bound token |
 | `writ_verify_token` | agent | Point-of-action token verification |
+| `writ_lease` | agent | Convert an ALLOW token into a single-use gated-execution lease |
+| `writ_execute` | agent | Run one gated upstream request with a lease or ALLOW token |
 | `writ_grant` | sponsor | Approve a STEP_UP (one-time grant) |
 | `writ_revoke` / `writ_reinstate` | sponsor | Kill switch on/off for a principal |
 | `writ_receipts` | agent | Audit trail of decisions |

@@ -8,6 +8,8 @@ from writ_mcp import server
 EXPECTED_TOOLS = {
     "writ_check",
     "writ_verify_token",
+    "writ_lease",
+    "writ_execute",
     "writ_grant",
     "writ_revoke",
     "writ_reinstate",
@@ -27,7 +29,7 @@ EXPECTED_TOOLS = {
 
 
 def test_version():
-    assert writ_mcp.__version__ == "0.2.0"
+    assert writ_mcp.__version__ == "0.2.1"
 
 
 def test_public_base_url_default():
