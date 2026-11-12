@@ -1,7 +1,7 @@
 ---
 name: writ
 description: Enforce Writ before consequential agent writes, handle ALLOW, DENY, and STEP_UP, verify authorization tokens, and understand scanner coverage. Use before money movement, messages, access or identity changes, deletes, deploys, state-changing external API calls, or other hard-to-undo actions.
-allowed-tools: mcp__plugin_writ_writ__writ_check, mcp__plugin_writ_writ__writ_verify_token, mcp__plugin_writ_writ__writ_sandbox, mcp__plugin_writ_writ__writ_receipts, mcp__plugin_writ_writ__writ_explain_receipt
+allowed-tools: mcp__plugin_writ_writ__writ_check, mcp__plugin_writ_writ__writ_verify_token, mcp__plugin_writ_writ__writ_lease, mcp__plugin_writ_writ__writ_execute, mcp__plugin_writ_writ__writ_sandbox, mcp__plugin_writ_writ__writ_receipts, mcp__plugin_writ_writ__writ_explain_receipt
 ---
 
 # Writ enforce-before-write rule
@@ -40,6 +40,10 @@ Do not perform the action, directly or through another tool. Do not retry with c
 Do not perform the action. Stop that action and surface it to the human sponsor, including the sponsor, agent, verb, target, purpose, returned reason, and receipt id. Explain that explicit human approval is required. The sponsor can use `writ_grant` or the dashboard to approve. After approval, run `writ_check` again; only a subsequent ALLOW plus successful token verification permits execution. Never approve on the user's behalf or treat silence as approval.
 
 Every decision lands in Writ's hash-chained audit log as a receipt. The record includes ALLOW, DENY, and STEP_UP outcomes. Use `writ_receipts` to inspect recent decisions and `writ_explain_receipt` when the user needs a receipt explained.
+
+## Run a gated write through the gate
+
+When the write goes to a vaulted upstream system (`stripe`, `github`, or `salesforce`), do not call that system's API directly. After ALLOW, convert the token with `writ_lease` (auth token, system, method, path, body), then run it with `writ_execute` using the same method, path, and body. A lease is single-use and bound to that exact request: if the method, path, or body differs, the gate fails closed and makes no upstream call. On an `ok: false` answer, report the reason and do not retry with a different request.
 
 ## Fail closed and use the sandbox honestly
 

@@ -76,7 +76,11 @@ data, or calling an external API that acts in the world, the agent must:
    sponsor approves it with `writ_grant` or the dashboard, check again.
 4. On `ALLOW`, call `writ_verify_token` immediately before executing the exact
    write authorized by the returned token.
-5. Fail closed if no key is configured or Writ cannot be reached. Use
+5. For a write to a vaulted upstream system (`stripe`, `github`, `salesforce`),
+   convert the ALLOW token with `writ_lease`, then run it with `writ_execute`
+   using the same method, path, and body. A lease is single-use and bound to
+   that exact request; on any mismatch the gate fails closed with no upstream call.
+6. Fail closed if no key is configured or Writ cannot be reached. Use
    `writ_sandbox` only for a no-key demo, never as authorization for a real
    action.
 
@@ -106,11 +110,12 @@ patterns and coverage limitations.
 
 ## Writ MCP tools
 
-The server exposes 17 tools:
+The server exposes 19 tools:
 
 | Area | Tools |
 | --- | --- |
 | Check and verify | `writ_check`, `writ_verify_token` |
+| Gated execution | `writ_lease`, `writ_execute` |
 | Sponsor controls | `writ_grant`, `writ_revoke`, `writ_reinstate` |
 | Receipts and policy | `writ_receipts`, `writ_policy`, `writ_explain_receipt` |
 | Demo | `writ_sandbox` |

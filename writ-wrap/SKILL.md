@@ -240,10 +240,10 @@ writ reinstate --sponsor "$WRIT_SPONSOR" --agent "$WRIT_AGENT"
 ## MCP server alternative (for agents without shell access)
 
 If the agent environment cannot run shell commands, use the **Writ MCP server**
-instead. It exposes the same operations as 17 tools:
+instead. It exposes the same operations as 19 tools:
 
 ```bash
-uvx writ-mcp==0.2.0
+uvx writ-mcp==0.2.1
 ```
 
 Tools available:
@@ -252,6 +252,8 @@ Tools available:
 |------|---------|
 | `writ_check` | Gate a write and get `ALLOW` / `DENY` / `STEP_UP` |
 | `writ_verify_token` | Validate an `ALLOW` auth token |
+| `writ_lease` | Convert an `ALLOW` token into a single-use gated-execution lease |
+| `writ_execute` | Run one gated upstream request with a lease or `ALLOW` token |
 | `writ_grant` | Human-sponsor approval for `STEP_UP` |
 | `writ_revoke` | Kill switch: revoke an agent/sponsor |
 | `writ_reinstate` | Re-enable a revoked agent/sponsor |

@@ -1,4 +1,4 @@
-"""Writ MCP server — point-of-action policy checks for AI agents, as MCP tools.
+"""Writ MCP server - point-of-action policy checks for AI agents, as MCP tools.
 
 An agent (or any MCP client) calls `writ_check` BEFORE performing a
 consequential write. Writ answers ALLOW, DENY, or STEP_UP, and every outcome
@@ -22,6 +22,7 @@ Run:  writ-mcp                  (stdio transport, installed via pip)
 import json
 import os
 import urllib.parse
+from typing import Optional
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -134,6 +135,107 @@ def writ_verify_token(auth_token: str, verb: str, target: str, purpose: str) -> 
         return _fmt(_key_call("POST", "/v1/tokens/verify", {
             "token": auth_token, "verb": verb, "target": target, "purpose": purpose,
         }))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
+@mcp.tool()
+def writ_lease(auth_token: str, system_id: str, method: str, path: str,
+               body: Optional[dict] = None, ttl_seconds: Optional[int] = None) -> str:
+    """Convert an ALLOW token into a single-use gated-execution lease.
+
+    Call this AFTER writ_check returns ALLOW, passing that ALLOW's authToken.
+    The lease is bound to the exact upstream request you intend to run: the
+    same method, path, and body bytes you will later pass to writ_execute.
+    A lease is single-use; once executed (or expired) it is spent.
+
+    Args:
+        auth_token:  The authToken from a writ_check ALLOW decision.
+        system_id:   The registered upstream system: "stripe", "github",
+                     or "salesforce". A vaulted credential must be active
+                     for this system or the gate answers ok:false.
+        method:      HTTP method of the upstream request (e.g. "POST").
+        path:        Upstream path (e.g. "/v1/refunds"). Must match the
+                     system's allowed path patterns.
+        body:        Optional JSON object (at most 1 MB). Sent only when
+                     provided; if you lease a body you must execute the
+                     identical body.
+        ttl_seconds: Optional lease TTL in seconds. The gate caps it at 90
+                     and at the token's remaining life.
+
+    On success the gate answers 201 with leaseId, expiresAt, ttlSeconds,
+    verb, target, purpose, and systemId. On failure it answers
+    {"ok": false, "reason": ...} (token invalid or expired, or no active
+    vaulted credential for the system). On ok:false do NOT execute.
+    """
+    try:
+        payload = {
+            "token": auth_token,
+            "systemId": system_id,
+            "method": method,
+            "path": path,
+        }
+        if body is not None:
+            payload["body"] = body
+        if ttl_seconds is not None:
+            payload["ttlSeconds"] = ttl_seconds
+        return _fmt(_key_call("POST", "/v1/leases", payload))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
+@mcp.tool()
+def writ_execute(lease_id: str = "", auth_token: str = "", system_id: str = "stripe",
+                 method: str = "", path: str = "", body: Optional[dict] = None,
+                 idempotency_key: str = "") -> str:
+    """Run one gated upstream request with a lease or ALLOW token.
+
+    Pass exactly one of lease_id (from writ_lease) or auth_token (from a
+    writ_check ALLOW). Pass the SAME method, path, and body as the lease:
+    the gate compares the request bytes against the lease, and on any
+    mismatch it fails closed: no upstream call is made and the answer is
+    {"ok": false, "reason": ..., "upstreamCalled": false}.
+
+    Args:
+        lease_id:        The leaseId from writ_lease. Mutually exclusive
+                         with auth_token.
+        auth_token:      An ALLOW authToken from writ_check. Mutually
+                         exclusive with lease_id.
+        system_id:       The registered upstream system: "stripe"
+                         (default), "github", or "salesforce".
+        method:          HTTP method of the upstream request (required,
+                         e.g. "POST").
+        path:            Upstream path (required, e.g. "/v1/refunds").
+        body:            Optional JSON object. Must be byte-identical to
+                         the leased body.
+        idempotency_key: Optional key passed through to the upstream
+                         system. Use it so retries are safe.
+
+    On success the gate returns the upstream system's status and body
+    verbatim. Every outcome writes a receipt. On {"ok": false} report the
+    reason to the user and do NOT retry with a different request: the
+    lease is spent or invalid.
+    """
+    if bool(lease_id) == bool(auth_token):
+        return _fmt({
+            "error": "provide exactly one of lease_id or auth_token",
+            "upstreamCalled": False,
+        })
+    try:
+        payload = {
+            "systemId": system_id,
+            "method": method,
+            "path": path,
+        }
+        if lease_id:
+            payload["leaseId"] = lease_id
+        else:
+            payload["token"] = auth_token
+        if body is not None:
+            payload["body"] = body
+        if idempotency_key:
+            payload["idempotencyKey"] = idempotency_key
+        return _fmt(_key_call("POST", "/v1/execute", payload))
     except WritError as e:
         return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
 
