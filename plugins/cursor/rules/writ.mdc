@@ -1,0 +1,74 @@
+---
+description: Gate consequential agent writes through Writ, verify ALLOW tokens, honor DENY and STEP_UP decisions, fail closed, and use the scanner to discover writes
+alwaysApply: false
+---
+
+# Gate consequential writes
+
+Writ is a policy gate and audit log. Before the agent performs a consequential
+write, call the Writ MCP tool `writ_check` with `sponsor_id`, `agent_id`,
+`verb`, `target`, and `purpose`. Identify the accountable human sponsor and the
+agent, use a verb from the repository's reviewed `writ-policy.json` when one
+applies, and describe the exact target and purpose.
+
+A consequential write includes moving money, sending messages, changing access
+or identity, deleting data, or calling an external API that acts in the world.
+The check must occur immediately before the action, after the target and
+purpose are known.
+
+1. Call `writ_check` and read the decision against the intended write.
+2. On `ALLOW`, keep the returned `authToken` bound to that exact write. Call
+   `writ_verify_token` immediately before execution with the returned token
+   and the intended `verb`, `target`, and `purpose`. Do not reuse the token for
+   a different or changed write.
+3. Proceed only if token verification confirms the authorization. Never bypass
+   the check by using another write path or by restating the purpose without a
+   new check.
+4. On `DENY`, do not execute or retry the write. Report the denial and its
+   reason to the human.
+5. On `STEP_UP`, pause the write and surface the exact action to the human for
+   approval. Tell the human that approval is given by a sponsor through
+   `writ_grant` or the dashboard. After approval, call `writ_check` again and
+   follow the resulting `ALLOW`, `DENY`, or `STEP_UP` before executing.
+6. On a tool error, missing API key, timeout, or unavailable network, fail
+   closed. Do not execute the consequential write. Explain that Writ could not
+   authorize it rather than treating the unknown result as an allow.
+
+Every Writ decision creates a receipt in the hash-chained audit log. Do not
+claim that a write was authorized or recorded when the tool did not confirm it.
+
+# Try Writ without a key
+
+When `WRIT_API_KEY` is not configured, do not perform a proposed consequential
+write. Call `writ_sandbox` when the human asks to exercise the Writ workflow
+without a key, then use `writ_check` with `verb="demo_write"` only within that
+sandbox. Never reinterpret a real requested write as a sandbox write or use a
+sandbox result to authorize it.
+
+# Scan the repository for writes
+
+When asked to discover or instrument agent write call sites, use the Writ
+scanner before changing the code:
+
+```bash
+pip install pywrit
+writ scan .
+```
+
+Review the generated `writ-policy.json` and the suggested instrumentation diff.
+Check the target, purpose, and proposed verb at each call site, and review the
+diff before applying it. Then run:
+
+```bash
+writ scan . --apply
+```
+
+Confirm the prompt and review the resulting changes and audit log receipts.
+Python supports scanning and automatic instrumentation with `--apply`.
+TypeScript and JavaScript are scan-only and never rewritten by `--apply`.
+Go is scan-only with a first detection family and is never rewritten by
+`--apply`. Local TypeScript, JavaScript, and Go parsing additionally uses the
+optional dependencies from `pip install 'pywrit[polyglot]'`. Instrument writes
+in those files manually after reviewing the scan.
+Scanner discovery is not complete security coverage: findings can be missed,
+so inspect consequential write paths beyond the findings list.

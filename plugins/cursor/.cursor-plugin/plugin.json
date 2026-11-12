@@ -1,0 +1,33 @@
+{
+  "name": "writ",
+  "version": "0.1.0",
+  "description": "Gate consequential agent writes with Writ and record every decision in a hash-chained audit log.",
+  "author": {
+    "name": "Writ"
+  },
+  "homepage": "https://withwrit.com",
+  "repository": "https://github.com/withwrit/pywrit",
+  "license": "MIT",
+  "keywords": [
+    "writ",
+    "agent-governance",
+    "audit-log",
+    "policy",
+    "mcp"
+  ],
+  "rules": "./rules/",
+  "mcpServers": "./mcp.json",
+  "variables": {
+    "type": "object",
+    "properties": {
+      "WRIT_API_KEY": {
+        "type": "string",
+        "title": "Writ API key",
+        "description": "An API key from app.withwrit.com. Do not commit the key to your repository."
+      }
+    },
+    "required": [
+      "WRIT_API_KEY"
+    ]
+  }
+}
