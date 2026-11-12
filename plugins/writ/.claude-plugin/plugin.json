@@ -1,0 +1,8 @@
+{
+  "name": "writ",
+  "description": "Writ is a policy gate and audit log that returns ALLOW, DENY, or STEP_UP before consequential AI agent writes and records every decision as a hash-chained receipt.",
+  "version": "0.2.0",
+  "author": {
+    "name": "Writ"
+  }
+}

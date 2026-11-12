@@ -1,0 +1,13 @@
+{
+  "name": "writ",
+  "description": "The Writ policy gate, audit log, scanner, and MCP tools for Claude Code.",
+  "owner": {
+    "name": "Writ"
+  },
+  "plugins": [
+    {
+      "name": "writ",
+      "source": "./plugins/writ"
+    }
+  ]
+}
