@@ -29,7 +29,7 @@ EXPECTED_TOOLS = {
 
 
 def test_version():
-    assert writ_mcp.__version__ == "0.2.1"
+    assert writ_mcp.__version__ == "0.2.2"
 
 
 def test_public_base_url_default():
