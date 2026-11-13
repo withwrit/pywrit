@@ -243,7 +243,7 @@ If the agent environment cannot run shell commands, use the **Writ MCP server**
 instead. It exposes the same operations as 19 tools:
 
 ```bash
-uvx writ-mcp==0.2.1
+uvx writ-mcp==0.2.2
 ```
 
 Tools available:
