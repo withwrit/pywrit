@@ -1452,6 +1452,13 @@ _GO_RESOURCE_METHODS = {"new", "update", "delete", "create"}
 # or ends in "db"/"tx" (db, tx, gormDB, dbtx, r.db, s.tx). Function roots
 # (createUser(...)) never qualify: "user" does not end in db/tx.
 _GO_HANDLE_RX = _re.compile(r"(db|tx)$")
+# Request-pipeline tails (slice 2): clients that route every call
+# through an internal pipeline method taking the HTTP method as
+# argument 0 (stripe-go: Backend.Call / RawRequest, so c.B.Call(
+# http.MethodPost, ...)). Argument 0 is graded by _go_write_method:
+# write methods (Post/Put/Patch/Delete string or http.MethodX
+# constant) fire, Get/Head and variables do not.
+_GO_PIPELINE_METHODS = {"call", "rawrequest"}
 
 
 class _GoFile:
@@ -1537,7 +1544,8 @@ def _go_write_method(call, f, idx):
 
 
 def _go_classify(call, chain, f, pkg_paths=None):
-    """First match wins; returns (rule_id, kind). Slice-1 family only.
+    """First match wins; returns (rule_id, kind). Slice-1 family plus
+    the slice-2 request-pipeline family (Call / RawRequest).
 
     `chain` is the raw (un-lowercased) callee chain. Handle receivers
     match by convention on any receiver segment (db, tx, gormDB, r.db,
@@ -1584,6 +1592,17 @@ def _go_classify(call, chain, f, pkg_paths=None):
                 # pre-v87 shape (charge.New) is a later slice, not this
                 # branch: two-segment chains never reach it.
                 return "go-sdk-write", "sdk"
+    if tail in _GO_PIPELINE_METHODS and len(norm) >= 2:
+        # request pipeline: <recv>.Call / .RawRequest with a write
+        # method as argument 0 (the stripe-go Backend shape:
+        # c.B.Call(http.MethodPost, "/v1/accounts", ...)). The
+        # arg-0 method check does the grading: http.MethodGet/Head is
+        # a read, a variable or context first argument never matches,
+        # and reflect.Value.Call (whose argument is a []Value) is
+        # excluded the same way. No receiver check: the Call /
+        # RawRequest tails collide with no other family.
+        if _go_write_method(call, f, 0):
+            return "go-pipeline-write", "http"
     return None
 
 

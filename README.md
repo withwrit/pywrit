@@ -38,7 +38,7 @@ install test.
 | --- | --- | --- | --- |
 | Python | Yes | Yes, inserts `_writ_check` gates | Parsed with the stdlib `ast`, no extra needed |
 | TypeScript / JavaScript | Yes, with `pywrit[polyglot]` | No, scan only | Needs the extra: `pip install 'pywrit[polyglot]'`. Without it, the report says so loudly: a warning block names the unscanned files instead of reporting zero findings |
-| Go | Yes, with `pywrit[polyglot]` | No, scan only | First detection family only: database/sql Exec/ExecContext, GORM Create/Save/Update/Updates/Delete, HTTP client writes and http.NewRequest with a write method, generated-client <client>.<Resource>.<New\|Update\|Delete\|Create>; package-level generated clients not yet covered. Without the extra, the report names the unscanned Go files in the same warning block as TS/JS |
+| Go | Yes, with `pywrit[polyglot]` | No, scan only | First detection family plus request-pipeline detection: database/sql Exec/ExecContext, GORM Create/Save/Update/Updates/Delete, HTTP client writes and http.NewRequest with a write method, generated-client <client>.<Resource>.<New\|Update\|Delete\|Create>, request-pipeline X.Call/X.RawRequest with a write method; package-level generated clients not yet covered. Without the extra, the report names the unscanned Go files in the same warning block as TS/JS |
 
 ## 60-second quickstart: scan → wrap → gate
 
@@ -168,7 +168,7 @@ pipeline (twilio-style generated clients, e.g. `twilio-node`).
 
     pip install 'pywrit[polyglot]'
 
-Covered in this first family: `database/sql` `Exec` / `ExecContext`, GORM `Create` / `Save` / `Update` / `Updates` / `Delete`, HTTP client `Post` / `Put` / `Patch` / `Delete` and `http.NewRequest` / `NewRequestWithContext` with a write method, and generated-client calls shaped `<client>.<Resource>.<New|Update|Delete|Create>` with an uppercase resource segment (the stripe-go shape). GET/HEAD requests, `db.Query` / `QueryRow`, and bare constructors are not flagged. `_test.go` files and `vendor/` trees are skipped. Go is **scan-only**: `writ scan --apply` never rewrites `.go` files, gate those by hand. Not yet covered: package-level generated clients (`charge.New(...)`, the pre-v87 stripe-go shape), request-pipeline calls with a variable method, and raw-SQL helpers.
+Covered in this first family plus request-pipeline detection: `database/sql` `Exec` / `ExecContext`, GORM `Create` / `Save` / `Update` / `Updates` / `Delete`, HTTP client `Post` / `Put` / `Patch` / `Delete` and `http.NewRequest` / `NewRequestWithContext` with a write method, generated-client calls shaped `<client>.<Resource>.<New|Update|Delete|Create>` with an uppercase resource segment (the stripe-go shape), and request-pipeline calls `X.Call(method, ...)` / `X.RawRequest(method, ...)` where argument 0 is a write method (the `stripe.Backend` shape, e.g. `c.B.Call(http.MethodPost, "/v1/accounts", ...)`). GET/HEAD requests, `db.Query` / `QueryRow`, bare constructors, and pipeline calls with a variable method or a non-method first argument are not flagged. `_test.go` files and `vendor/` trees are skipped. Go is **scan-only**: `writ scan --apply` never rewrites `.go` files, gate those by hand. Not yet covered: package-level generated clients (`charge.New(...)`, the pre-v87 stripe-go shape), GORM raw-SQL helpers, and other Go write patterns.
 
 ## GitHub Action
 
