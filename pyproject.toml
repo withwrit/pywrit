@@ -23,8 +23,8 @@ polyglot = [
 keywords = ["ai-agents", "policy", "audit-log", "guardrails"]
 
 [project.urls]
-Homepage = "https://github.com/withwrit/pywrit"
-Documentation = "https://withwrit.com/docs"
+Homepage = "https://withwrit.com"
+Documentation = "https://docs.withwrit.com"
 
 [project.scripts]
 writ = "pywrit.cli:main"

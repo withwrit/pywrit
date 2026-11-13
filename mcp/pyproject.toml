@@ -16,9 +16,9 @@ dependencies = [
 keywords = ["ai-agents", "mcp", "policy", "audit-log", "guardrails"]
 
 [project.urls]
-Homepage = "https://github.com/withwrit/pywrit"
+Homepage = "https://withwrit.com"
 Repository = "https://github.com/withwrit/pywrit/tree/main/mcp"
-Documentation = "https://withwrit.com/docs"
+Documentation = "https://docs.withwrit.com"
 
 [project.scripts]
 writ-mcp = "writ_mcp.server:main"
