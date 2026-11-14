@@ -303,6 +303,29 @@ def writ_receipts(limit: int = 10) -> str:
 
 
 @mcp.tool()
+def writ_verify_receipts(limit: int = 200) -> str:
+    """Verify the tenant audit-log hash chain and report whether it is intact.
+
+    Walks the tenant's receipt chain from its head, recomputing every visited
+    receipt's HMAC. This is the endpoint behind `./writ verify-chain`: use it
+    to prove the audit log has not been tampered with.
+
+    Args:
+        limit: Max receipts to verify, newest first. Default 200, clamped to
+            the range 1..1000.
+
+    Returns the gate payload verbatim: ok (chain intact), checked (receipts
+    verified), tip and tipReceipt (chain head), chainedFrom, legacyCount, and
+    complete. Verification stops at legacy (pre-chain) receipts and reports
+    them as legacyCount.
+    """
+    try:
+        n = min(1000, max(1, limit))
+        return _fmt(_key_call("GET", f"/v1/receipts/verify?limit={n}"))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+@mcp.tool()
 def writ_policy() -> str:
     """Read the tenant's verb policy: which verbs allow, deny, require a grant, or step up."""
     try:

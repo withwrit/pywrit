@@ -1,6 +1,6 @@
 {
   "name": "writ",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Gate consequential agent writes with Writ and record every decision in a hash-chained audit log.",
   "author": {
     "name": "Writ"

@@ -90,6 +90,7 @@ The tool descriptions teach the agent this flow, but the short version:
 | `writ_grant` | sponsor | Approve a STEP_UP (one-time grant) |
 | `writ_revoke` / `writ_reinstate` | sponsor | Kill switch on/off for a principal |
 | `writ_receipts` | agent | Audit trail of decisions |
+| `writ_verify_receipts` | agent | Verify the audit-log hash chain |
 | `writ_policy` | agent | Tenant verb policy |
 | `writ_sandbox` | anyone | Free 90-second demo grant, no key needed |
 | `writ_github_installations` | admin | List connected GitHub App installations |
