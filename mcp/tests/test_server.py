@@ -14,6 +14,7 @@ EXPECTED_TOOLS = {
     "writ_revoke",
     "writ_reinstate",
     "writ_receipts",
+    "writ_verify_receipts",
     "writ_policy",
     "writ_sandbox",
     "writ_github_installations",
@@ -29,7 +30,7 @@ EXPECTED_TOOLS = {
 
 
 def test_version():
-    assert writ_mcp.__version__ == "0.2.2"
+    assert writ_mcp.__version__ == "0.2.3"
 
 
 def test_public_base_url_default():

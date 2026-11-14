@@ -3,8 +3,8 @@
 Writ is a policy gate and audit log for AI agent writes. This Cursor Plugin
 packages the Writ MCP server and a rule that tells the agent to check before a
 consequential write. Writ returns `ALLOW`, `DENY`, or `STEP_UP`, and every
-decision creates a receipt in a hash-chained audit log. The server exposes 17
-tools for checks, authorization, receipts, policy, and administration.
+decision creates a receipt in a hash-chained audit log. The server exposes 20
+tools for checks, authorization, gated execution, receipts, policy, and administration.
 
 The included scanner workflow finds write call sites in a repository. Python
 supports scanning and automatic instrumentation. TypeScript and JavaScript are
@@ -110,14 +110,14 @@ patterns and coverage limitations.
 
 ## Writ MCP tools
 
-The server exposes 19 tools:
+The server exposes 20 tools:
 
 | Area | Tools |
 | --- | --- |
 | Check and verify | `writ_check`, `writ_verify_token` |
 | Gated execution | `writ_lease`, `writ_execute` |
 | Sponsor controls | `writ_grant`, `writ_revoke`, `writ_reinstate` |
-| Receipts and policy | `writ_receipts`, `writ_policy`, `writ_explain_receipt` |
+| Receipts and policy | `writ_receipts`, `writ_verify_receipts`, `writ_policy`, `writ_explain_receipt` |
 | Demo | `writ_sandbox` |
 | GitHub App | `writ_github_installations`, `writ_github_set_threshold`, `writ_github_toggle_pr_comments` |
 | Repository manifests | `writ_manifests` |

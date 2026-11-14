@@ -44,7 +44,7 @@ Then run `/reload-plugins` if the installation summary says a reload is needed. 
 
 ### Writ MCP server
 
-`.mcp.json` declares one server named `writ` and runs `uvx writ-mcp`. The `writ-mcp` package provides 19 tools for checks, token verification, gated-execution leases and upstream execution, grants, revocation, receipts, policy, the keyless sandbox, GitHub App controls, manifests, receipt explanations, notifications, principals, verbs, and API key metadata. The main write flow uses `writ_check` and then `writ_verify_token` immediately before an allowed action.
+`.mcp.json` declares one server named `writ` and runs `uvx writ-mcp`. The `writ-mcp` package provides 20 tools for checks, token verification, gated-execution leases and upstream execution, grants, revocation, receipts, audit-log hash-chain verification with `writ_verify_receipts`, policy, the keyless sandbox, GitHub App controls, manifests, receipt explanations, notifications, principals, verbs, and API key metadata. The main write flow uses `writ_check` and then `writ_verify_token` immediately before an allowed action.
 
 The server needs `WRIT_API_KEY` for tenant policy checks. No key or no network means no `ALLOW`; do not treat a timeout or tool error as authorization. `writ_sandbox` is available without a key for a 90-second demonstration using `demo_write` and a target beginning with `demo-`, not for real-world authorization.
 
