@@ -26,11 +26,13 @@ EXPECTED_TOOLS = {
     "writ_principals",
     "writ_verbs",
     "writ_keys",
+    "writ_badge_token",
+    "writ_badge_revoke",
 }
 
 
 def test_version():
-    assert writ_mcp.__version__ == "0.2.3"
+    assert writ_mcp.__version__ == "0.2.4"
 
 
 def test_public_base_url_default():
