@@ -102,6 +102,8 @@ The tool descriptions teach the agent this flow, but the short version:
 | `writ_principals` | admin | List the tenant's principals |
 | `writ_verbs` | admin | List the tenant's verb vocabulary |
 | `writ_keys` | admin | List API key metadata |
+| `writ_badge_token` | agent | Mint a public README badge token |
+| `writ_badge_revoke` | agent | Revoke a badge token; its badge image URL 404s |
 
 Try it with no key: `writ_sandbox` → `writ_check` with `verb="demo_write"`.
 

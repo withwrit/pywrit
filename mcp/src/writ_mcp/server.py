@@ -479,6 +479,47 @@ def writ_keys() -> str:
         return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
 
 
+@mcp.tool()
+def writ_badge_token(label: str = "") -> str:
+    """Mint a public badge token for the tenant and return its embed snippet.
+
+    The badge renders the tenant's live gated-write count over the trailing
+    30 days. The token is shown exactly once: store it, it is needed to
+    revoke the badge. It is public by design (it lives in a README image
+    URL) and cannot be used as an API key. See
+    https://docs.withwrit.com/readme-badge for the verification model.
+
+    Args:
+        label: Optional private label for your own bookkeeping (max 40
+            chars, letters/digits/space/_/.-). Never rendered on the badge.
+
+    Returns the gate payload verbatim: badgeToken (writ_badge_...),
+    badgeUrl, markdown (ready-to-paste README snippet), label, and a note.
+    """
+    try:
+        body = {"label": label} if label else None
+        return _fmt(_key_call("POST", "/v1/badge/tokens", body))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
+@mcp.tool()
+def writ_badge_revoke(badge_token: str) -> str:
+    """Revoke one of the tenant's badge tokens.
+
+    Its badge image URL 404s from that moment on, so embeds show a broken
+    image rather than a stale claim. Only tokens belonging to the caller's
+    tenant can be revoked.
+
+    Args:
+        badge_token: The writ_badge_ token to revoke (shown once at mint time).
+    """
+    try:
+        return _fmt(_key_call("POST", "/v1/badge/tokens/revoke",
+                              {"badgeToken": badge_token}))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
 def main():
     """Console-script entry point: run the MCP server over stdio."""
     mcp.run()
