@@ -41,6 +41,16 @@ purpose are known.
 Every Writ decision creates a receipt in the hash-chained audit log. Do not
 claim that a write was authorized or recorded when the tool did not confirm it.
 
+The Writ server exposes 24 tools. Beyond the check-and-verify pair, use
+`writ_receipts` and `writ_explain_receipt` to inspect decisions,
+`writ_verify_receipts` to prove the audit log's hash chain is intact,
+`writ_policy` / `writ_verbs` / `writ_principals` / `writ_keys` for tenant
+inventory, and `writ_tenant_invite` plus `writ_join_tenant` for the team
+invite flow: `writ_tenant_invite` mints (and rotates, invalidating the old
+one) the tenant's one live `writ_inv_...` code, and a teammate joins with
+`writ_join_tenant(email, invite_code)`, which issues their API key without
+any existing key. Joining members receive no sponsor token.
+
 # Try Writ without a key
 
 When `WRIT_API_KEY` is not configured, do not perform a proposed consequential
