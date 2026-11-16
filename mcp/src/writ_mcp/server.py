@@ -520,6 +520,56 @@ def writ_badge_revoke(badge_token: str) -> str:
     except WritError as e:
         return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
 
+@mcp.tool()
+def writ_tenant_invite() -> str:
+    """Mint a team invite code (writ_inv_...) for your tenant.
+
+    Share the code with teammates: they pass it as invite_code to
+    writ_join_tenant (POST /v1/keys) to join this tenant instead of creating
+    their own. Creating a new code ROTATES and invalidates the old one,
+    so there is only ever one live invite code per tenant, and only mint when
+    the team needs a fresh code.
+
+    Returns the gate payload verbatim: inviteCode, tenantId, and a note.
+    """
+    try:
+        return _fmt(_key_call("POST", "/v1/tenant/invites", None))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
+@mcp.tool()
+def writ_join_tenant(email: str, invite_code: str, tenant_name: str = "") -> str:
+    """Join an existing Writ tenant with a team invite code. No API key needed.
+
+    This is the join flow: the endpoint is unauthenticated (the caller has no
+    key yet, that is the point) and issues a fresh API key on the invited
+    tenant instead of creating a new one. This tool is not general key
+    issuance: invite_code is required.
+
+    Args:
+        email:       Contact email for the new key.
+        invite_code: The team's live writ_inv_... code (from
+                     writ_tenant_invite, shared by a teammate).
+        tenant_name: Optional display name; only sent when non-empty.
+
+    Returns the gate payload verbatim: apiKey, tenantId, plan,
+    monthlyChecks, defaultPolicy, and sponsorToken only when present.
+    Store the apiKey immediately: it is shown once. Joining members receive
+    NO sponsor token; only the first key of a brand-new tenant does. If a
+    sponsorToken IS present, store it too: it is never recoverable and it
+    approves grants and operates the kill switch. The gate rate-limits key
+    issuance to 10 keys per hour per client IP.
+    """
+    try:
+        body = {"email": email, "inviteCode": invite_code}
+        if tenant_name:
+            body["tenantName"] = tenant_name
+        return _fmt(_call("POST", "/v1/keys", body))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
 def main():
     """Console-script entry point: run the MCP server over stdio."""
     mcp.run()
