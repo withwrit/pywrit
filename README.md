@@ -199,7 +199,7 @@ Setup and data handling: [GitHub App docs](https://docs.withwrit.com/git-hub-app
 
 Give any MCP-compatible agent point-of-action policy checks. `writ-mcp` is a
 [Model Context Protocol](https://modelcontextprotocol.io) server (stdio transport,
-built on the MCP Python SDK) that exposes the Writ gate as **22 MCP tools**:
+built on the MCP Python SDK) that exposes the Writ gate as **24 MCP tools**:
 the agent calls `writ_check` before a consequential write and gets back `ALLOW`,
 `DENY`, or `STEP_UP` — with a tamper-evident, hash-chained audit receipt for
 every decision.
@@ -233,6 +233,8 @@ pip install writ-mcp   # then run `writ-mcp`
 | `writ_keys` | List API key metadata |
 | `writ_badge_token` | Mint a public README badge token |
 | `writ_badge_revoke` | Revoke a badge token; its badge image URL 404s |
+| `writ_tenant_invite` | Mint/rotate the tenant's one live team invite code (writ_inv_...) |
+| `writ_join_tenant` | Join a tenant with an invite code; issues an API key, no key needed first |
 
 The gate tools need a free Writ API key (`WRIT_API_KEY`): 10,000 receipts/month
 free, no credit card. `writ_sandbox` works with no key at all.
