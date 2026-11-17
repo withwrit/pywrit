@@ -1395,17 +1395,21 @@ def _tsjs_scan_source(src, filename, parser):
     return sites, gated
 
 
-# writ scan, Go (slice 1): deterministic and scan-only (Go files are never
-# rewritten). Same tree-sitter tier as TS/JS, same `pywrit[polyglot]`
-# extra plus the tree-sitter-go grammar; without the extra the
-# missing-extra block counts Go files too. Slice 1 covers one write
-# family, deliberately: database/sql Exec/ExecContext on a db/tx handle,
-# GORM-shaped Create/Save/Update/Updates/Delete on a db handle, HTTP
-# client writes (Post/Put/Patch/Delete calls and NewRequest(-WithContext)
-# with a write method), and generated-client resource methods of the
-# stripe-go shape (<client>.<Resource>.<New|Update|Delete|Create> with an
-# uppercase middle segment). Wider Go coverage (os/io/fs writes, sqlx,
-# raw-SQL conditions on Exec, non-stripe generated-client shapes,
+# writ scan, Go (slices 1-3): deterministic and scan-only (Go files are
+# never rewritten). Same tree-sitter tier as TS/JS, same
+# `pywrit[polyglot]` extra plus the tree-sitter-go grammar; without the
+# extra the missing-extra block counts Go files too. Slice 1 covers one
+# write family, deliberately: database/sql Exec/ExecContext on a db/tx
+# handle, GORM-shaped Create/Save/Update/Updates/Delete on a db handle,
+# HTTP client writes (Post/Put/Patch/Delete calls and
+# NewRequest(-WithContext) with a write method), and generated-client
+# resource methods of the stripe-go shape
+# (<client>.<Resource>.<New|Update|Delete|Create> with an uppercase
+# middle segment). Slice 2 adds request-pipeline Call/RawRequest with a
+# write method as argument 0. Slice 3 adds import-aware package-level
+# generated clients (<pkg>.<New|Update|Delete|Create>, the pre-v87
+# stripe-go shape: charge.New(params)). Wider Go coverage (os/io/fs
+# writes, sqlx, raw-SQL conditions on Exec, GORM raw-SQL helpers,
 # Go-specific non-product suppression classes) ships in later slices.
 # ---------------------------------------------------------------------------
 
@@ -1423,9 +1427,10 @@ _GO_PKG_ROOTS = {"http", "sql", "gorm"}
 # Update) are ubiquitous in real code (structs like Params, Args, Options,
 # Config); the stripe-go generated-client shape is three segments
 # (client.Charges.New), so two-segment chains never fire the sdk rule.
-# The package-level pre-v87 shape (charge.New(params)) is NOT flagged in
-# slice 1: telling it apart from a bare constructor (paymentsvc.New)
-# needs import-aware detection, which is a later slice; see
+# The package-level pre-v87 shape (charge.New(params)) fires only in
+# slice 3's import-aware branch below: the two-segment chain's root
+# must be an imported package whose path is resource-shaped, so a bare
+# local constructor (svc.New) never matches; see
 # tests/fixtures/go/pkgclient.go.
 _GO_STRUCTY_RES = {"params", "args", "arg", "opts", "options", "config",
                    "conf", "cfg", "settings", "props", "attrs", "info",
@@ -1459,6 +1464,29 @@ _GO_HANDLE_RX = _re.compile(r"(db|tx)$")
 # write methods (Post/Put/Patch/Delete string or http.MethodX
 # constant) fire, Get/Head and variables do not.
 _GO_PIPELINE_METHODS = {"call", "rawrequest"}
+# Service/client/library-shaped import-path endings that must NOT fire
+# the slice-3 package-level generated-client rule: a two-segment
+# `<pkg>.<New|Update|Delete|Create>` call is a package-level resource
+# method only when the import path's last segment names a resource
+# (charge, invoice), so a path whose last segment ends in one of these
+# is plumbing, not a resource: paymentsvc.New(cfg) and client.New(...)
+# are constructors on a service/client package, not writes, and
+# internal/mock/fake packages are plumbing or test doubles. The check
+# is a suffix match against the import path's lowercase last segment
+# (never the local alias), so concatenated names (gensvc,
+# stripeclient, paymentsvc) are plumbing too, while real resource
+# names (charge, invoice, customer, subscription, account) do not end
+# this way and still fire, aliased or not
+# (acmeinvoice "example.com/acme/acme-payments/invoice").
+_GO_PKGCLIENT_NONRESOURCE = (
+    # service- and client-shaped: the path's last segment is the
+    # service or client itself, not a resource
+    "svc", "service", "client", "server",
+    # library- and layer-shaped: imports of plumbing, not resources
+    "api", "sdk", "gateway", "internal", "pkg", "lib",
+    # test doubles
+    "mock", "fake", "stub",
+)
 
 
 class _GoFile:
@@ -1543,9 +1571,24 @@ def _go_write_method(call, f, idx):
         ac[1][len("method"):] in _GO_HTTP_WRITE_METHODS
 
 
+def _go_import_resource_name(path):
+    """Last meaningful segment of a Go import path, lowercased: the
+    package name as the compiler resolves it. A trailing semantic-
+    import-versioning segment (github.com/stripe/stripe-go/v87 -> the
+    path .../v87/charge ends in "charge" anyway; this folds a path that
+    ENDS in vN, e.g. example.com/mod/v2 -> "mod", matching the module
+    name a consumer would reference)."""
+    seg = path.rstrip("/").rsplit("/", 1)[-1].lower()
+    if _re.fullmatch(r"v\d+", seg):
+        seg = path.rstrip("/").rsplit("/", 2)[-2].lower() \
+            if "/" in path.rstrip("/") else seg
+    return seg
+
+
 def _go_classify(call, chain, f, pkg_paths=None):
-    """First match wins; returns (rule_id, kind). Slice-1 family plus
-    the slice-2 request-pipeline family (Call / RawRequest).
+    """First match wins; returns (rule_id, kind). Slice-1 family, the
+    slice-3 package-level generated-client family, plus the slice-2
+    request-pipeline family (Call / RawRequest).
 
     `chain` is the raw (un-lowercased) callee chain. Handle receivers
     match by convention on any receiver segment (db, tx, gormDB, r.db,
@@ -1592,6 +1635,27 @@ def _go_classify(call, chain, f, pkg_paths=None):
                 # pre-v87 shape (charge.New) is a later slice, not this
                 # branch: two-segment chains never reach it.
                 return "go-sdk-write", "sdk"
+    if tail in _GO_RESOURCE_METHODS and len(chain) == 2 and \
+            pkg_paths is not None and chain[0] in pkg_paths:
+        # package-level generated client, the pre-v87 stripe-go shape
+        # (slice 3): charge.New(params), invoice.Update("in_123", nil).
+        # Import-aware on every axis: the root must be a package this
+        # file imports; the path must be a real module (first segment
+        # is a domain, containing a dot) so bare stdlib constructors
+        # (errors.New, reflect.New, crypto/hmac hmac.New) never fire;
+        # and the import path's last segment (not the local alias) must
+        # be resource-shaped, not structy (_GO_STRUCTY_RES) and not
+        # service/client/library-shaped (_GO_PKGCLIENT_NONRESOURCE). A
+        # bare local `svc.New(cfg)` with no matching import never fires;
+        # `paymentsvc.New(cfg)` on an imported service package never
+        # fires.
+        path = pkg_paths[chain[0]]
+        if "." not in path.split("/", 1)[0]:
+            return None  # stdlib constructor, not a generated client
+        last = _go_import_resource_name(path)
+        if last not in _GO_STRUCTY_RES and not \
+                last.endswith(_GO_PKGCLIENT_NONRESOURCE):
+            return "go-pkgclient-write", "sdk"
     if tail in _GO_PIPELINE_METHODS and len(norm) >= 2:
         # request pipeline: <recv>.Call / .RawRequest with a write
         # method as argument 0 (the stripe-go Backend shape:

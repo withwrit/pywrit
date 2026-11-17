@@ -30,7 +30,8 @@ HAVE_EXTRA = bool(cli._go_parsers())
 _BLOCK_EXTRA = {m: None for m in ("tree_sitter", "tree_sitter_go",
                                   "tree_sitter_language_pack")}
 _GO_RULES = {"go-db-write", "go-orm-write", "go-http-client-write",
-             "go-http-request-write", "go-sdk-write", "go-pipeline-write"}
+             "go-http-request-write", "go-sdk-write", "go-pipeline-write",
+             "go-pkgclient-write"}
 _EXPECT = re.compile(r"//\s*expect:\s*([a-z0-9-]+)")
 _FINDING = re.compile(
     r"^    (?P<file>\S+\.go):(?P<line>\d+) \[(?P<kind>[a-z]+)\] "
@@ -113,12 +114,14 @@ class FixtureRulesTest(unittest.TestCase):
         self.assertEqual(code, 0)
         n = len(_expected())
         self.assertIn("go files scanned: 6  skipped: 0  (scan only, no --apply)", out)
-        self.assertIn("go write sites: %d in 7 function(s)" % n, out)
+        self.assertIn("go write sites: %d in 8 function(s)" % n, out)
         self.assertIn("go gated: 0/%d (0%%)" % n, out)
         self.assertIn("    db.go:13 [db] go-db-write deleteOrder(): "
                       "db.Exec(\"DELETE FROM orders WHERE id = $1\", id)", out)
         self.assertIn("    sdk.go:6 [sdk] go-sdk-write chargeCard(): "
                       "sc.Charges.New(params)", out)
+        self.assertIn("    pkgclient.go:25 [sdk] go-pkgclient-write "
+                      "legacyCharge(): charge.New(params)", out)
         for v in ("db.delete", "db.create", "http.submit", "sdk.charge",
                   "sdk.nested"):
             self.assertEqual(verbs.get(v), "require_grant", v)
