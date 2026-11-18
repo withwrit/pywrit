@@ -57,7 +57,7 @@ The scanner is the pip package `pywrit`, which installs the `writ` command:
 
 - **Python:** scan and auto-instrument with `writ scan --apply` after reviewing `writ-policy.json`.
 - **TypeScript and JavaScript:** scan-only. Do not claim `--apply` instruments them.
-- **Go:** scan-only with the first detection family. Do not claim complete Go detection or auto-instrumentation.
+- **Go:** scan-only with the first detection family plus request-pipeline Call/RawRequest and package-level generated clients. Do not claim complete Go detection or auto-instrumentation.
 
 A scan is discovery, not a policy decision. Findings are heuristic and incomplete language coverage is not evidence that a repository has no consequential writes. Check the actual write immediately before execution even when a scanner did not report its call-site.
 
