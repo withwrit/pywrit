@@ -56,7 +56,7 @@ The server needs `WRIT_API_KEY` for tenant policy checks. No key or no network m
 
 `commands/scan.md` installs `pywrit` with pip when `writ` is missing, runs `writ scan` on the selected repository, and summarizes discovered write sites and ungated sites by risk. It identifies coverage gaps and explains the next step: review `writ-policy.json`, then run `writ scan --apply` only after that review. The command itself does not apply instrumentation.
 
-Coverage is Python scan plus auto-instrumentation, TypeScript and JavaScript scan-only, and Go scan-only with the first detection family. TypeScript, JavaScript, and Go scanning uses the optional `pywrit[polyglot]` dependencies.
+Coverage is Python scan plus auto-instrumentation, TypeScript and JavaScript scan-only, and Go scan-only with the first detection family plus request-pipeline Call/RawRequest and package-level generated clients. TypeScript, JavaScript, and Go scanning uses the optional `pywrit[polyglot]` dependencies.
 
 ### `/writ:check`
 
