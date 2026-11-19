@@ -1395,7 +1395,7 @@ def _tsjs_scan_source(src, filename, parser):
     return sites, gated
 
 
-# writ scan, Go (slices 1-3): deterministic and scan-only (Go files are
+# writ scan, Go (slices 1-4): deterministic and scan-only (Go files are
 # never rewritten). Same tree-sitter tier as TS/JS, same
 # `pywrit[polyglot]` extra plus the tree-sitter-go grammar; without the
 # extra the missing-extra block counts Go files too. Slice 1 covers one
@@ -1408,9 +1408,11 @@ def _tsjs_scan_source(src, filename, parser):
 # middle segment). Slice 2 adds request-pipeline Call/RawRequest with a
 # write method as argument 0. Slice 3 adds import-aware package-level
 # generated clients (<pkg>.<New|Update|Delete|Create>, the pre-v87
-# stripe-go shape: charge.New(params)). Wider Go coverage (os/io/fs
-# writes, sqlx, raw-SQL conditions on Exec, GORM raw-SQL helpers,
-# Go-specific non-product suppression classes) ships in later slices.
+# stripe-go shape: charge.New(params)). Slice 4 adds the GORM raw-SQL
+# helper: <db|tx>.Raw(<write SQL string literal>) graded on the
+# literal's first keyword. Wider Go coverage (os/io/fs writes, sqlx,
+# raw-SQL conditions on Exec, WITH-CTE raw-SQL writes, Go-specific
+# non-product suppression classes) ships in later slices.
 # ---------------------------------------------------------------------------
 
 _GO_MAX_BYTES = 1000000  # larger files are almost always generated
@@ -1422,6 +1424,15 @@ _GO_TEST_DIRS = {"tests", "testing"}
 # so a variable or field never collides with a package- or
 # resource-segment rule.
 _GO_PKG_ROOTS = {"http", "sql", "gorm"}
+
+# Write-first SQL verbs for the slice-4 GORM raw-SQL grade: a Raw()
+# string literal is a write only when its first keyword (leading
+# whitespace stripped) is one of these, case-insensitive. Read-first
+# statements (SELECT, SHOW, DESCRIBE, EXPLAIN) never fire, and a
+# leading WITH (CTE) is deliberately not graded past in this slice:
+# it never fires, write tail or not.
+_GO_RAWSQL_WRITE_VERBS = ("insert", "update", "delete", "replace",
+                          "truncate", "merge")
 
 # Classifier noise guards. Uppercase two-segment selectors (s.Info.
 # Update) are ubiquitous in real code (structs like Params, Args, Options,
@@ -1487,6 +1498,24 @@ _GO_PKGCLIENT_NONRESOURCE = (
     # test doubles
     "mock", "fake", "stub",
 )
+
+
+def _go_rawsql_write(call, f):
+    """Slice-4 grade for the GORM Raw helper: the call is a write only
+    when argument 0 is an interpreted or backtick string literal whose
+    first keyword (leading whitespace stripped, case-insensitive) is a
+    write verb in _GO_RAWSQL_WRITE_VERBS. A variable, a concatenation,
+    a fmt.Sprintf call, or any non-literal first argument never fires
+    (literal() returns None); read-first SQL (SELECT, SHOW, DESCRIBE,
+    EXPLAIN) and a leading WITH (CTE) fall through as reads."""
+    args = _go_args(call)
+    if not args:
+        return False
+    lit = f.literal(args[0])
+    if lit is None:
+        return False
+    words = lit.lstrip().split(None, 1)
+    return bool(words) and words[0].lower() in _GO_RAWSQL_WRITE_VERBS
 
 
 class _GoFile:
@@ -1587,8 +1616,9 @@ def _go_import_resource_name(path):
 
 def _go_classify(call, chain, f, pkg_paths=None):
     """First match wins; returns (rule_id, kind). Slice-1 family, the
-    slice-3 package-level generated-client family, plus the slice-2
-    request-pipeline family (Call / RawRequest).
+    slice-3 package-level generated-client family, the slice-2
+    request-pipeline family (Call / RawRequest), and the slice-4 GORM
+    raw-SQL family (Raw with a write-first SQL literal).
 
     `chain` is the raw (un-lowercased) callee chain. Handle receivers
     match by convention on any receiver segment (db, tx, gormDB, r.db,
@@ -1612,6 +1642,10 @@ def _go_classify(call, chain, f, pkg_paths=None):
         if tail in _GO_ORM_METHODS:
             # GORM shape: db.Create / Save / Update / Updates / Delete
             return "go-orm-write", "db"
+        if tail == "raw" and _go_rawsql_write(call, f):
+            # GORM raw SQL (slice 4): db.Raw / tx.Raw, only when the
+            # literal SQL's first keyword is a write verb.
+            return "go-rawsql-write", "db"
     if tail in _GO_HTTP_VERBS:
         if norm[0] == "http" and len(norm) == 2:
             # package-level http.Post / Put / Patch / Delete
