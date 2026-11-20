@@ -1395,7 +1395,7 @@ def _tsjs_scan_source(src, filename, parser):
     return sites, gated
 
 
-# writ scan, Go (slices 1-4): deterministic and scan-only (Go files are
+# writ scan, Go (slices 1-5): deterministic and scan-only (Go files are
 # never rewritten). Same tree-sitter tier as TS/JS, same
 # `pywrit[polyglot]` extra plus the tree-sitter-go grammar; without the
 # extra the missing-extra block counts Go files too. Slice 1 covers one
@@ -1410,8 +1410,10 @@ def _tsjs_scan_source(src, filename, parser):
 # generated clients (<pkg>.<New|Update|Delete|Create>, the pre-v87
 # stripe-go shape: charge.New(params)). Slice 4 adds the GORM raw-SQL
 # helper: <db|tx>.Raw(<write SQL string literal>) graded on the
-# literal's first keyword. Wider Go coverage (os/io/fs writes, sqlx,
-# raw-SQL conditions on Exec, WITH-CTE raw-SQL writes, Go-specific
+# literal's first keyword. Slice 5 grades past a leading WITH: the
+# main statement after the CTE list is graded on its first keyword the
+# same way. Wider Go coverage (os/io/fs writes, sqlx,
+# raw-SQL conditions on Exec, Go-specific
 # non-product suppression classes) ships in later slices.
 # ---------------------------------------------------------------------------
 
@@ -1425,12 +1427,13 @@ _GO_TEST_DIRS = {"tests", "testing"}
 # resource-segment rule.
 _GO_PKG_ROOTS = {"http", "sql", "gorm"}
 
-# Write-first SQL verbs for the slice-4 GORM raw-SQL grade: a Raw()
+# Write-first SQL verbs for the slice-4/5 GORM raw-SQL grade: a Raw()
 # string literal is a write only when its first keyword (leading
-# whitespace stripped) is one of these, case-insensitive. Read-first
-# statements (SELECT, SHOW, DESCRIBE, EXPLAIN) never fire, and a
-# leading WITH (CTE) is deliberately not graded past in this slice:
-# it never fires, write tail or not.
+# whitespace stripped) is one of these, case-insensitive. A leading
+# WITH (slice 5) is graded past: the main statement after the CTE
+# list is graded on its first keyword the same way. Read-first
+# statements (SELECT, SHOW, DESCRIBE, EXPLAIN, and WITH ... SELECT)
+# never fire.
 _GO_RAWSQL_WRITE_VERBS = ("insert", "update", "delete", "replace",
                           "truncate", "merge")
 
@@ -1500,22 +1503,129 @@ _GO_PKGCLIENT_NONRESOURCE = (
 )
 
 
+def _go_sql_first_kw(lit):
+    """The first keyword that decides the write grade of a Raw() SQL
+    literal, else None when no keyword qualifies. Normally the
+    literal's first keyword; for a leading WITH (slice 5) the CTE list
+    is walked and the keyword is the main statement's first keyword
+    instead. The CTE walk is a real parse, not a substring search for
+    a write verb: keywords inside a CTE query never decide the grade.
+    Anything not keyword-shaped (an empty literal, one that starts
+    with "(" or "--") and a WITH statement off the CTE-list shape
+    (unbalanced parens, a CTE list that never terminates, a paren
+    right after WITH, no main verb) never reaches _GO_RAWSQL_WRITE_VERBS,
+    so it falls through as a read."""
+    s = lit.lstrip()
+    m = _re.match(r"[A-Za-z_][A-Za-z0-9_$]*", s)
+    first = m.group(0).lower() if m else ""
+    if first != "with":
+        return first or None
+    i = m.end()
+    n = len(s)
+    if i < n and s[i] == "(":
+        # not the name-first CTE-list shape (a row list): off shape
+        return None
+
+    def ws(j):
+        while j < n and s[j].isspace():
+            j += 1
+        return j
+
+    def word(j):
+        j = ws(j)
+        k = j
+        while k < n and (s[k].isalnum() or s[k] in "_$"):
+            k += 1
+        return (s[j:k].lower(), k) if k > j else (None, k)
+
+    def ident(j):
+        j = ws(j)
+        w, k = word(j)
+        if w is not None:
+            return k
+        if j < n and s[j] in '"`[':  # a quoted CTE name
+            close = "]" if s[j] == "[" else s[j]
+            k = j + 1
+            while k < n:
+                if s[k] == close:
+                    if k + 1 < n and s[k + 1] == close:
+                        k += 2
+                        continue
+                    return k + 1
+                k += 1
+        return -1
+
+    def parens(j):
+        j = ws(j)
+        if j >= n or s[j] != "(":
+            return -1
+        depth = 0
+        while j < n:
+            if s[j] == "(":
+                depth += 1
+            elif s[j] == ")":
+                depth -= 1
+                if depth == 0:
+                    return j + 1
+            j += 1
+        return -1
+
+    if word(i)[0] == "recursive":
+        i = word(i)[1]
+    while True:
+        # each CTE definition: name, optional column list, AS,
+        # optional (NOT) MATERIALIZED, one balanced query group
+        if ws(i) >= n:
+            return None  # no name after WITH or comma: malformed
+        i = ident(i)
+        if i < 0:
+            return None
+        j = ws(i)
+        if j < n and s[j] == "(":  # optional column list
+            i = parens(i)
+            if i < 0:
+                return None
+        w, i = word(i)
+        if w != "as":
+            return None
+        w, i = word(i)
+        if w == "materialized":
+            i = word(i)[1]
+        elif w == "not":
+            w, i = word(i)
+            if w != "materialized":
+                return None
+            i = word(i)[1]
+        i = parens(i)  # the CTE query: may nest parens, commas, verbs
+        if i < 0:
+            return None
+        j = ws(i)
+        if j < n and s[j] == ",":
+            i = j + 1
+            continue
+        return word(i)[0]  # the main verb, or None when missing
+
+
 def _go_rawsql_write(call, f):
     """Slice-4 grade for the GORM Raw helper: the call is a write only
     when argument 0 is an interpreted or backtick string literal whose
-    first keyword (leading whitespace stripped, case-insensitive) is a
-    write verb in _GO_RAWSQL_WRITE_VERBS. A variable, a concatenation,
-    a fmt.Sprintf call, or any non-literal first argument never fires
-    (literal() returns None); read-first SQL (SELECT, SHOW, DESCRIBE,
-    EXPLAIN) and a leading WITH (CTE) fall through as reads."""
+    grading keyword (case-insensitive) is a write verb in
+    _GO_RAWSQL_WRITE_VERBS. A variable, a concatenation, a fmt.Sprintf
+    call, or any non-literal first argument never fires (literal()
+    returns None); read-first SQL (SELECT, SHOW, DESCRIBE, EXPLAIN)
+    falls through as a read. Slice 5: the grading keyword of a leading
+    WITH statement is the main statement verb past the CTE list, so
+    WITH ... DELETE / INSERT / UPDATE fires while WITH ... SELECT
+    stays silent; a malformed WITH statement grades as a read."""
     args = _go_args(call)
     if not args:
         return False
     lit = f.literal(args[0])
     if lit is None:
         return False
-    words = lit.lstrip().split(None, 1)
-    return bool(words) and words[0].lower() in _GO_RAWSQL_WRITE_VERBS
+    return _go_sql_first_kw(lit) in _GO_RAWSQL_WRITE_VERBS
+
+
 
 
 class _GoFile:
@@ -1643,8 +1753,9 @@ def _go_classify(call, chain, f, pkg_paths=None):
             # GORM shape: db.Create / Save / Update / Updates / Delete
             return "go-orm-write", "db"
         if tail == "raw" and _go_rawsql_write(call, f):
-            # GORM raw SQL (slice 4): db.Raw / tx.Raw, only when the
-            # literal SQL's first keyword is a write verb.
+            # GORM raw SQL (slices 4-5): db.Raw / tx.Raw, only when
+            # the literal SQL's grading keyword is a write verb (past
+            # a leading WITH when present).
             return "go-rawsql-write", "db"
     if tail in _GO_HTTP_VERBS:
         if norm[0] == "http" and len(norm) == 2:

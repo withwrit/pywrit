@@ -113,8 +113,8 @@ class FixtureRulesTest(unittest.TestCase):
             verbs = __import__("json").loads(policy.read_text())
         self.assertEqual(code, 0)
         n = len(_expected())
-        self.assertIn("go files scanned: 7  skipped: 0  (scan only, no --apply)", out)
-        self.assertIn("go write sites: %d in 11 function(s)" % n, out)
+        self.assertIn("go files scanned: 8  skipped: 0  (scan only, no --apply)", out)
+        self.assertIn("go write sites: %d in 13 function(s)" % n, out)
         self.assertIn("go gated: 0/%d (0%%)" % n, out)
         self.assertIn("    db.go:13 [db] go-db-write deleteOrder(): "
                       "db.Exec(\"DELETE FROM orders WHERE id = $1\", id)", out)
@@ -317,7 +317,7 @@ class JsonReportTest(unittest.TestCase):
         self.assertEqual(code, 0, out)
         doc = j.loads(out)
         self.assertFalse(doc["go_hint"])
-        self.assertEqual(doc["files_scanned"], 7)
+        self.assertEqual(doc["files_scanned"], 8)
         go_findings = [f for f in doc["findings"]
                        if f["language"] == "go"]
         self.assertEqual(len(go_findings), len(_expected()), doc)
