@@ -3,8 +3,8 @@
 // first keyword is a write verb (INSERT, UPDATE, DELETE, REPLACE,
 // TRUNCATE, MERGE), case-insensitive. Stay silent: a read-first
 // literal (SELECT), a variable SQL string, and a Raw call on a
-// receiver that is not a db/tx handle. A leading WITH (CTE) is not
-// graded past in this slice, so it stays silent too.
+// receiver that is not a db/tx handle. A leading WITH (CTE) is
+// graded past since slice 5: see withcte.go for those cases.
 // Lines tagged `expect:` must be flagged with that rule.
 package main
 
