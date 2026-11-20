@@ -8,7 +8,7 @@ tools for checks, authorization, gated execution, receipts, policy, and administ
 
 The included scanner workflow finds write call sites in a repository. Python
 supports scanning and automatic instrumentation. TypeScript and JavaScript are
-scan-only. Go is scan-only with a first detection family plus request-pipeline Call/RawRequest and package-level generated clients.
+scan-only. Go is scan-only with a first detection family plus request-pipeline Call/RawRequest, package-level generated clients, and GORM Raw raw-SQL writes.
 
 ## Requirements
 
