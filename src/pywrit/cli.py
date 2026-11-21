@@ -1395,7 +1395,7 @@ def _tsjs_scan_source(src, filename, parser):
     return sites, gated
 
 
-# writ scan, Go (slices 1-5): deterministic and scan-only (Go files are
+# writ scan, Go (slices 1-6): deterministic and scan-only (Go files are
 # never rewritten). Same tree-sitter tier as TS/JS, same
 # `pywrit[polyglot]` extra plus the tree-sitter-go grammar; without the
 # extra the missing-extra block counts Go files too. Slice 1 covers one
@@ -1412,7 +1412,9 @@ def _tsjs_scan_source(src, filename, parser):
 # helper: <db|tx>.Raw(<write SQL string literal>) graded on the
 # literal's first keyword. Slice 5 grades past a leading WITH: the
 # main statement after the CTE list is graded on its first keyword the
-# same way. Wider Go coverage (os/io/fs writes, sqlx,
+# same way. Slice 6 adds verb coverage: GORM FirstOrCreate /
+# CreateInBatches on a db/tx handle and http.PostForm (package-level
+# and client method). Wider Go coverage (os/io/fs writes, sqlx,
 # raw-SQL conditions on Exec, Go-specific
 # non-product suppression classes) ships in later slices.
 # ---------------------------------------------------------------------------
@@ -1461,8 +1463,17 @@ _GO_STRUCTY_RES = {"params", "args", "arg", "opts", "options", "config",
                    "util", "utils", "helper", "helpers", "internal"}
 
 _GO_SQL_METHODS = {"exec", "execcontext"}
-_GO_ORM_METHODS = {"create", "save", "update", "updates", "delete"}
-_GO_HTTP_VERBS = {"post", "put", "patch", "delete"}
+# GORM write methods (slice 6 adds FirstOrCreate / CreateInBatches).
+# FirstOrCreate reads first and creates the row when the lookup misses;
+# that conditional create is still a write. CreateInBatches is a batch
+# insert. Attrs / Assign are modifiers, not writes alone, and stay off.
+_GO_ORM_METHODS = {"create", "save", "update", "updates", "delete",
+                   "firstorcreate", "createinbatches"}
+# HTTP client write verbs (slice 6 adds PostForm: an urlencoded POST,
+# package-level http.PostForm and the client method client.PostForm).
+# Not added to _GO_HTTP_WRITE_METHODS: POSTFORM is not an HTTP method
+# string, so a pipeline call with "POSTFORM" as argument 0 stays silent.
+_GO_HTTP_VERBS = {"post", "put", "patch", "delete", "postform"}
 _GO_NEW_REQUEST = {"newrequest", "newrequestwithcontext"}
 _GO_HTTP_WRITE_METHODS = {"post", "put", "patch", "delete"}
 _GO_RESOURCE_METHODS = {"new", "update", "delete", "create"}
@@ -1750,7 +1761,8 @@ def _go_classify(call, chain, f, pkg_paths=None):
             # database/sql: db.Exec / db.ExecContext, tx.Exec, r.db.Exec
             return "go-db-write", "db"
         if tail in _GO_ORM_METHODS:
-            # GORM shape: db.Create / Save / Update / Updates / Delete
+            # GORM shape: db.Create / Save / Update / Updates / Delete /
+            # FirstOrCreate / CreateInBatches
             return "go-orm-write", "db"
         if tail == "raw" and _go_rawsql_write(call, f):
             # GORM raw SQL (slices 4-5): db.Raw / tx.Raw, only when
@@ -1759,11 +1771,12 @@ def _go_classify(call, chain, f, pkg_paths=None):
             return "go-rawsql-write", "db"
     if tail in _GO_HTTP_VERBS:
         if norm[0] == "http" and len(norm) == 2:
-            # package-level http.Post / Put / Patch / Delete
+            # package-level http.Post / Put / Patch / Delete / PostForm
             return "go-http-client-write", "http"
         if not is_pkg_root and recv and \
                 any(c == "client" or c.endswith("client") for c in recv):
-            # client.Post / s.client.Delete on an HTTP client handle
+            # client.Post / client.PostForm / s.client.Delete on an
+            # HTTP client handle
             return "go-http-client-write", "http"
     if tail in _GO_NEW_REQUEST and norm[0] == "http" and len(norm) == 2:
         idx = 0 if tail == "newrequest" else 1
