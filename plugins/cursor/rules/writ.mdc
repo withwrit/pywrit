@@ -80,7 +80,7 @@ writ scan . --apply
 Confirm the prompt and review the resulting changes and audit log receipts.
 Python supports scanning and automatic instrumentation with `--apply`.
 TypeScript and JavaScript are scan-only and never rewritten by `--apply`.
-Go is scan-only with a first detection family plus request-pipeline Call/RawRequest, package-level generated clients, and GORM Raw raw-SQL writes including WITH-CTE writes, and is never rewritten by
+Go is scan-only with a first detection family plus request-pipeline Call/RawRequest, package-level generated clients, and GORM Raw raw-SQL writes including WITH-CTE writes, and verb coverage: GORM FirstOrCreate/CreateInBatches and HTTP PostForm, and is never rewritten by
 `--apply`. Local TypeScript, JavaScript, and Go parsing additionally uses the
 optional dependencies from `pip install 'pywrit[polyglot]'`. Instrument writes
 in those files manually after reviewing the scan.
