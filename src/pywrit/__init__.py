@@ -27,7 +27,7 @@ from .errors import (
     WritError,
 )
 
-__version__ = "0.2.20"
+__version__ = "0.2.21"
 
 __all__ = [
     "WritClient",
