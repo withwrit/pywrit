@@ -1395,7 +1395,7 @@ def _tsjs_scan_source(src, filename, parser):
     return sites, gated
 
 
-# writ scan, Go (slices 1-6): deterministic and scan-only (Go files are
+# writ scan, Go (slices 1-7): deterministic and scan-only (Go files are
 # never rewritten). Same tree-sitter tier as TS/JS, same
 # `pywrit[polyglot]` extra plus the tree-sitter-go grammar; without the
 # extra the missing-extra block counts Go files too. Slice 1 covers one
@@ -1414,13 +1414,70 @@ def _tsjs_scan_source(src, filename, parser):
 # main statement after the CTE list is graded on its first keyword the
 # same way. Slice 6 adds verb coverage: GORM FirstOrCreate /
 # CreateInBatches on a db/tx handle and http.PostForm (package-level
-# and client method). Wider Go coverage (os/io/fs writes, sqlx,
-# raw-SQL conditions on Exec, Go-specific
-# non-product suppression classes) ships in later slices.
+# and client method). Slice 7 adds Go non-product suppression classes
+# (directory classes plus testdata and the standard codegen marker),
+# mirroring the TS/JS design. Wider Go coverage (os/io/fs writes, sqlx,
+# raw-SQL conditions on Exec) ships in later slices.
 # ---------------------------------------------------------------------------
 
 _GO_MAX_BYTES = 1000000  # larger files are almost always generated
 _GO_TEST_DIRS = {"tests", "testing"}
+
+# Go non-product path classes, same design as _TSJS_NON_PRODUCT_DIRS:
+# write findings from these paths parse as real writes but are almost
+# never product behavior (docs tooling, examples, test fixtures,
+# generated code), so they are suppressed from the report by default,
+# counted per class under "suppressed", and restored with
+# --include-non-product. Directory classes match on whole path
+# segments at any depth, never filename substring, so product code
+# next to an excluded directory stays reported. The six directory
+# class segment sets are the TS/JS ones; testdata is the Go fixture
+# convention; generated matches the standard codegen marker in the
+# file's leading lines (see _go_non_product_class), never a filename
+# rule: a file named gen.go with no marker stays product code.
+_GO_NON_PRODUCT_DIRS = {
+    "docs": {"docs", "doc"},
+    "scripts": {"scripts"},
+    "examples": {"examples", "example"},
+    "sandbox": {"sandbox"},
+    "benchmark": {"benchmark", "benchmarks"},
+    "demo": {"demo", "demos"},
+    "testdata": {"testdata"},
+}
+# The standard Go codegen marker: protoc, mockgen, sqlc, and stringer
+# all emit exactly this shape as the file's first line(s).
+_GO_GENERATED_MARKER = _re.compile(r"^// Code generated .* DO NOT EDIT\.$")
+
+
+def _go_non_product_class(path, root, src):
+    """Return the non-product class for a Go file, or None.
+
+    Directory classes (docs, scripts, examples, sandbox, benchmark,
+    demo, testdata) match on whole path segments at any depth, never
+    filename substring, so product code beside an excluded directory
+    (lib/demo-utils.go) stays reported. The generated class matches a
+    line `// Code generated ... DO NOT EDIT.` (the marker protoc,
+    mockgen, sqlc, and stringer emit) among the file's first 10 lines;
+    src is the file's bytes as already read by the caller, decoded
+    with errors replaced. A .go file with no such marker is never
+    generated, even if its name contains gen: filenames are not the
+    signal in this slice (no *.pb.go / *.gen.go rule).
+
+    Precedence when a file matches more than one class is the
+    deterministic order docs, scripts, examples, sandbox, benchmark,
+    demo, testdata, generated: directory classes first in declaration
+    order, then the generated marker last, so a marked file under
+    examples/ reports as examples.
+    """
+    rel = path.relative_to(root)
+    segs = set(rel.parts[:-1])
+    for cls, names in _GO_NON_PRODUCT_DIRS.items():
+        if segs & names:
+            return cls
+    for line in src.decode("utf-8", errors="replace").splitlines()[:10]:
+        if _GO_GENERATED_MARKER.match(line):
+            return "generated"
+    return None
 
 # chain[0] in one of these keeps its case: the selector names a package,
 # not a variable. Package roots are package-level rules' anchor;
@@ -1978,15 +2035,18 @@ def _go_collect_files(root, excludes):
     return sorted(out)
 
 
-def _go_scan(root, excludes):
-    """Return dict with files, skipped, sites, gated, missing_extra.
-    Never raises on a bad file: a Go file that fails to parse is skipped,
-    never fatal. Go findings are always reported (no non-product
-    suppression classes in slice 1; the go JSON object carries
-    `suppressed` only when a later slice adds them)."""
+def _go_scan(root, excludes, include_non_product=False):
+    """Return dict with files, skipped, sites, gated, suppressed,
+    missing_extra. Never raises on a bad file: a Go file that fails to
+    parse is skipped, never fatal.
+
+    Findings from non-product paths (_go_non_product_class) are not
+    dropped, they are counted per class in res["suppressed"] so the
+    report can say exactly what was held back. include_non_product
+    restores the old behavior of reporting every site."""
     files = _go_collect_files(root, excludes)
     res = {"files": files, "skipped": [], "sites": [], "gated": set(),
-           "missing_extra": False}
+           "suppressed": {}, "missing_extra": False}
     if not files:
         return res
     parsers = _go_parsers()
@@ -2002,6 +2062,14 @@ def _go_scan(root, excludes):
             sites, gated = _go_scan_source(src, str(path), parsers["go"])
         except Exception:
             res["skipped"].append(str(path))
+            continue
+        cls = None if include_non_product \
+            else _go_non_product_class(path, root, src)
+        if cls is not None and sites:
+            bucket = res["suppressed"].setdefault(
+                cls, {"sites": 0, "files": {}})
+            bucket["sites"] += len(sites)
+            bucket["files"][str(path)] = len(sites)
             continue
         res["sites"].extend(sites)
         res["gated"].update((str(path),) + g for g in gated)
@@ -2165,6 +2233,20 @@ def print_scan_json(root, files, skipped, sites, gated_funcs, tsjs, ts_sites,
                 for c in ts_suppressed.values()
                 for f in c["files"]),
         }
+    go_suppressed = go.get("suppressed") or {}
+    go_sup_total = _tsjs_suppressed_total(go_suppressed)
+    if go_sup_total:
+        # Non-product findings held back by default: never dropped
+        # silently; the report names every suppressed path.
+        doc["go_suppressed_non_product"] = {
+            "sites": go_sup_total,
+            "by_class": {c: go_suppressed[c]["sites"]
+                         for c in sorted(go_suppressed)},
+            "files": sorted(
+                str(_pathlib.Path(f).relative_to(root))
+                for c in go_suppressed.values()
+                for f in c["files"]),
+        }
     if go.get("missing_extra") and go.get("files"):
         # The extra is missing: Go files were collected but none were
         # scanned. Machine consumers get the same state the text report
@@ -2204,7 +2286,8 @@ def _scan_repo(root, excludes, include_non_product=False):
 
     tsjs = _tsjs_scan(root, excludes or [],
                       include_non_product=include_non_product)
-    go = _go_scan(root, excludes or [])
+    go = _go_scan(root, excludes or [],
+                  include_non_product=include_non_product)
     return files, skipped, sites, gated, tsjs, go
 
 
@@ -2425,6 +2508,19 @@ def scan_cmd(args):
             print("    %s:%d [%s] %s %s(): %s" % (
                 _pathlib.Path(s.file).relative_to(root), s.lineno, s.kind,
                 rid, s.func or "<module>", s.snippet))
+        suppressed = go.get("suppressed") or {}
+        sup_total = _tsjs_suppressed_total(suppressed)
+        if sup_total:
+            by_class = ", ".join("%s: %d" % (c, suppressed[c]["sites"])
+                                 for c in sorted(suppressed))
+            print("  go non-product: %d site(s) suppressed (%s); "
+                  "re-run with --include-non-product to show them"
+                  % (sup_total, by_class))
+            for cls in sorted(suppressed):
+                for f in sorted(suppressed[cls]["files"]):
+                    print("    suppressed %s: %d site(s) [%s]" % (
+                        _pathlib.Path(f).relative_to(root),
+                        suppressed[cls]["files"][f], cls))
     if verbs:
         print("  verbs discovered: %d" % len(verbs))
         for vname in sorted(verbs):
