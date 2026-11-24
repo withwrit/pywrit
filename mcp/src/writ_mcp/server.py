@@ -335,6 +335,25 @@ def writ_policy() -> str:
 
 
 @mcp.tool()
+def writ_me() -> str:
+    """Who the configured API key is acting as.
+
+    This is the Writ "who am I": returns who the configured API key belongs
+    to (tenant id and name, key email and plan), the policy summary, and the
+    monthly receipt usage (monthlyChecks). Never returns the raw key.
+
+    Returns the gate payload verbatim: tenant (id, name), key (email, plan),
+    policy (per-verb modes), and monthlyChecks. Free tier is 10,000
+    receipts/month; checks return 402 payment_required once it is exhausted
+    or billing is past due.
+    """
+    try:
+        return _fmt(_key_call("GET", "/v1/me"))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
+@mcp.tool()
 def writ_sandbox(sponsor_id: str, agent_id: str, target: str, purpose: str) -> str:
     """Get a free 90-second sandbox grant for a demo write. No API key needed.
 
