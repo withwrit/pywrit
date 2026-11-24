@@ -30,11 +30,12 @@ EXPECTED_TOOLS = {
     "writ_badge_revoke",
     "writ_tenant_invite",
     "writ_join_tenant",
+    "writ_me",
 }
 
 
 def test_version():
-    assert writ_mcp.__version__ == "0.2.5"
+    assert writ_mcp.__version__ == "0.2.6"
 
 
 def test_public_base_url_default():
