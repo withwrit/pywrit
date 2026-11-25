@@ -102,6 +102,7 @@ The tool descriptions teach the agent this flow, but the short version:
 | `writ_principals` | admin | List the tenant's principals |
 | `writ_verbs` | admin | List the tenant's verb vocabulary |
 | `writ_keys` | admin | List API key metadata |
+| `writ_me` | admin | Who the API key belongs to: tenant, key email and plan, policy summary, monthly receipt usage |
 | `writ_badge_token` | agent | Mint a public README badge token |
 | `writ_badge_revoke` | agent | Revoke a badge token; its badge image URL 404s |
 | `writ_tenant_invite` | admin | Mint/rotate the tenant's one live team invite code (writ_inv_...) |
