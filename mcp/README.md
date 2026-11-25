@@ -92,6 +92,9 @@ The tool descriptions teach the agent this flow, but the short version:
 | `writ_receipts` | agent | Audit trail of decisions |
 | `writ_verify_receipts` | agent | Verify the audit-log hash chain |
 | `writ_policy` | agent | Tenant verb policy |
+| `writ_policies` | agent | List the tenant default plus every environment and principal override |
+| `writ_policy_env` | agent | Read or set one environment's sparse override (plus effectivePolicy and policyProvenance) |
+| `writ_policy_principal` | agent | Read or set one principal's sparse override; `inherit` unsets a verb; tombstoned or disabled principals fail closed |
 | `writ_sandbox` | anyone | Free 90-second demo grant, no key needed |
 | `writ_github_installations` | admin | List connected GitHub App installations |
 | `writ_github_set_threshold` | admin | Set the check-run fail threshold per install |

@@ -31,11 +31,14 @@ EXPECTED_TOOLS = {
     "writ_tenant_invite",
     "writ_join_tenant",
     "writ_me",
+    "writ_policies",
+    "writ_policy_env",
+    "writ_policy_principal",
 }
 
 
 def test_version():
-    assert writ_mcp.__version__ == "0.2.6"
+    assert writ_mcp.__version__ == "0.2.7"
 
 
 def test_public_base_url_default():

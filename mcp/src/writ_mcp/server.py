@@ -334,6 +334,163 @@ def writ_policy() -> str:
         return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
 
 
+ENVIRONMENTS = ("dev", "staging", "prod")
+# Verb list mirrors the gate examples (GET /v1/policies responses). Tenant
+# custom verbs beyond this list are still validated gate-side; an unknown
+# verb here fails fast without spending a gate call.
+POLICY_VERBS = ("admit", "prescribe", "provision", "refund", "verify", "verify_human")
+POLICY_MODES = ("allow", "deny", "require_grant", "step_up")
+
+
+def _parse_policy(policy_json, allow_inherit=False):
+    """Validate a policy JSON object string for an override PUT.
+
+    Returns the bare {"verb": mode} dict to send, or a string error message
+    (bad JSON, not an object, empty object, unknown verb, unknown mode).
+    Validation is client-side so an invalid override never reaches the gate.
+    """
+    try:
+        parsed = json.loads(policy_json)
+    except (TypeError, ValueError) as e:
+        return (f"policy is not valid JSON: {e}. "
+                'Expected a JSON object string like \'{"refund": "allow"}\'.')
+    if not isinstance(parsed, dict):
+        return 'policy must be a JSON object string like \'{"refund": "allow"}\'.'
+    if not parsed:
+        return 'policy must set at least one verb, e.g. \'{"refund": "allow"}\'.'
+    for verb in parsed:
+        if verb not in POLICY_VERBS:
+            return (f"unknown verb {verb!r}; known verbs: "
+                    f"{', '.join(POLICY_VERBS)}.")
+    modes = POLICY_MODES + (("inherit",) if allow_inherit else ())
+    for verb, mode in parsed.items():
+        if mode not in modes:
+            suffix = " (inherit removes a verb from the override)" if allow_inherit else ""
+            return (f"unknown mode {mode!r} for verb {verb!r}; valid modes: "
+                    f"{', '.join(modes)}{suffix}.")
+    return parsed
+
+
+@mcp.tool()
+def writ_policies() -> str:
+    """List every policy object for the tenant.
+
+    Returns the gate payload verbatim: the tenant default first
+    (scope "tenant"), then each configured per-environment override
+    (scope "environment"), then each per-principal override (scope
+    "principal" with principalId). Environments without an override are not
+    listed; checks naming them evaluate against the tenant default.
+    """
+    try:
+        return _fmt(_key_call("GET", "/v1/policies"))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
+@mcp.tool()
+def writ_policy_env(environment: str, policy: str = "") -> str:
+    """Read or set one environment's sparse policy override (dev, staging, or prod).
+
+    With policy empty: GET the override. Returns the gate payload verbatim -
+    the sparse override in policy (only the verbs it explicitly sets; empty
+    with version 0 when never configured), effectivePolicy (the tenant
+    default with the override applied on top, which is what checks naming
+    this environment evaluate against), and policyProvenance naming the
+    winning layer (tenant or environment) per verb.
+
+    With policy given: PUT the override. Pass a JSON object string of verb
+    to mode, e.g. '{"refund": "allow"}'. Modes: allow, deny, require_grant,
+    step_up. The override is sparse: only the verbs you send are stored;
+    every other verb keeps inheriting the tenant default. Every successful
+    update bumps the override's version by one; the tenant default's version
+    is untouched. To relax a verb in one environment, set it to "allow".
+
+    Args:
+        environment: dev, staging, or prod. Validated client-side; anything
+            else returns an error JSON without calling the gate.
+        policy: JSON object string of verbs to modes, e.g.
+            '{"refund": "allow"}'. Empty string (default) reads instead.
+            Bad JSON, unknown verbs, or unknown modes return an error JSON
+            without calling the gate.
+
+    Returns the gate payload verbatim on success; on failure an error JSON
+    with error, status, and detail.
+    """
+    if environment not in ENVIRONMENTS:
+        return _fmt({"error": f"unknown environment {environment!r}; must be dev, staging, or prod",
+                     "status": 400,
+                     "detail": {"environment": environment,
+                                "validEnvironments": list(ENVIRONMENTS)}})
+    try:
+        path = "/v1/policies/environments/" + urllib.parse.quote(environment, safe="")
+        if not policy:
+            return _fmt(_key_call("GET", path))
+        parsed = _parse_policy(policy)
+        if isinstance(parsed, str):
+            return _fmt({"error": parsed, "status": 400, "detail": {"policy": policy}})
+        return _fmt(_key_call("PUT", path, parsed))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
+@mcp.tool()
+def writ_policy_principal(principal_id: str, policy: str = "", environment: str = "") -> str:
+    """Read or set one principal's sparse policy override (the top policy layer).
+
+    With policy empty: GET the override. Returns the gate payload verbatim -
+    the sparse override in policy (only the verbs it explicitly sets; empty
+    with version 0 when never configured), effectivePolicy it resolves to,
+    and policyProvenance naming the winning layer (principal, environment,
+    or tenant) per verb. Pass environment to fold that environment's
+    override into the middle layer, exactly as a check naming it would
+    evaluate. Tombstoned principals still return 200 with "inert": true -
+    they stay resolvable forever, but their override never supplies a mode
+    while the principal is deleted or disabled. A principalId from another
+    tenant is 404.
+
+    With policy given: PUT the override. Pass a JSON object string of verb
+    to mode, e.g. '{"refund": "step_up"}'. Modes: allow, deny, require_grant,
+    step_up, and inherit - sending {"refund": "inherit"} removes that verb
+    from the principal's override so it inherits downward again. The
+    override is sparse: only the verbs you send are stored, and every
+    successful update bumps the override's version by one. Fail closed:
+    configuring policy on a tombstoned or disabled principal is 400
+    (principal_inactive); an identity that cannot authorize checks cannot
+    carry policy either.
+
+    Args:
+        principal_id: The principal (prn_...) whose override to read or set.
+        policy: JSON object string of verbs to modes, e.g.
+            '{"refund": "step_up"}'. Empty string (default) reads instead.
+            Bad JSON, unknown verbs, or unknown modes return an error JSON
+            without calling the gate.
+        environment: Optional dev, staging, or prod for the read; appends
+            ?environment= so the effective policy and provenance fold that
+            environment's override into the middle layer. Anything else
+            returns an error JSON without calling the gate.
+
+    Returns the gate payload verbatim on success; on failure an error JSON
+    with error, status, and detail.
+    """
+    if environment and environment not in ENVIRONMENTS:
+        return _fmt({"error": f"unknown environment {environment!r}; must be dev, staging, or prod",
+                     "status": 400,
+                     "detail": {"environment": environment,
+                                "validEnvironments": list(ENVIRONMENTS)}})
+    try:
+        path = "/v1/policies/principals/" + urllib.parse.quote(principal_id, safe="")
+        if not policy:
+            if environment:
+                path += "?environment=" + urllib.parse.quote(environment, safe="")
+            return _fmt(_key_call("GET", path))
+        parsed = _parse_policy(policy, allow_inherit=True)
+        if isinstance(parsed, str):
+            return _fmt({"error": parsed, "status": 400, "detail": {"policy": policy}})
+        return _fmt(_key_call("PUT", path, parsed))
+    except WritError as e:
+        return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
 @mcp.tool()
 def writ_me() -> str:
     """Who the configured API key is acting as.
