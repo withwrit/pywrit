@@ -199,7 +199,7 @@ Setup and data handling: [GitHub App docs](https://docs.withwrit.com/git-hub-app
 
 Give any MCP-compatible agent point-of-action policy checks. `writ-mcp` is a
 [Model Context Protocol](https://modelcontextprotocol.io) server (stdio transport,
-built on the MCP Python SDK) that exposes the Writ gate as **25 MCP tools**:
+built on the MCP Python SDK) that exposes the Writ gate as **28 MCP tools**:
 the agent calls `writ_check` before a consequential write and gets back `ALLOW`,
 `DENY`, or `STEP_UP` — with a tamper-evident, hash-chained audit receipt for
 every decision.
@@ -221,6 +221,9 @@ pip install writ-mcp   # then run `writ-mcp`
 | `writ_receipts` | Read the tenant's audit log |
 | `writ_verify_receipts` | Verify the audit-log hash chain |
 | `writ_policy` | Manage the verb policy |
+| `writ_policies` | List the tenant default plus every environment and principal override |
+| `writ_policy_env` | Read or set one environment's sparse policy override |
+| `writ_policy_principal` | Read or set one principal's sparse policy override |
 | `writ_sandbox` | Keyless 90-second demo grant — no API key needed |
 | `writ_github_installations` | List connected GitHub App installations |
 | `writ_github_set_threshold` | Set the check-run fail threshold per install |
