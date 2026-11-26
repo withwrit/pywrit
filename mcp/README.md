@@ -100,6 +100,7 @@ The tool descriptions teach the agent this flow, but the short version:
 | `writ_github_set_threshold` | admin | Set the check-run fail threshold per install |
 | `writ_github_toggle_pr_comments` | admin | Enable/disable the PR-comment bot |
 | `writ_manifests` | agent | List repos with risk profiles or fetch one manifest |
+| `writ_scan` | anyone | Scan a local directory for consequential writes (Python, TS/JS, Go), no gate call and no API key. Prerequisite: the pywrit scanner installed in the same Python environment (`pip install "pywrit[polyglot]"`). Findings capped at `max_findings` (default 25) |
 | `writ_explain_receipt` | agent | Explain a receipt in plain language |
 | `writ_tenant_notify` | admin | Get or update step-up notification settings |
 | `writ_principals` | admin | List the tenant's principals |

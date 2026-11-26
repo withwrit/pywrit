@@ -22,6 +22,7 @@ Run:  writ-mcp                  (stdio transport, installed via pip)
 import json
 import os
 import urllib.parse
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -590,6 +591,180 @@ def writ_manifests(repo_id: str = "") -> str:
         return _fmt(_key_call("GET", path))
     except WritError as e:
         return _fmt({"error": str(e), "status": e.status, "detail": e.payload})
+
+
+_PYWRIT_INSTALL_CMD = 'pip install "pywrit[polyglot]"'
+
+
+def _scan_snippet(snippet, limit=100):
+    return " ".join(str(snippet or "").split())[:limit]
+
+
+def _scan_not_scanned(lang, key, n_files):
+    """notScanned payload when the polyglot extra is missing: files were
+    seen but none scanned, with the CLI's wording and install command."""
+    return {"language": lang,
+            "filesSeen": n_files,
+            "filesScanned": 0,
+            "warning": (f"WARNING: {n_files} {key} file(s) were seen but "
+                        "none were scanned. The polyglot extra is not "
+                        "installed, so this report covers Python only. "
+                        f"Zero {key} findings is a coverage gap, not a "
+                        "clean result."),
+            "install": _PYWRIT_INSTALL_CMD}
+
+
+@mcp.tool()
+def writ_scan(path: str, include_non_product: bool = False, max_findings: int = 25) -> str:
+    """Scan a local directory for consequential writes (no gate call).
+
+    LOCAL-ONLY: this tool never calls the Writ gate, needs no API key, and
+    never rewrites files. It runs the pywrit scanner in-process over the
+    directory: Python (ast, always available), plus TypeScript/JavaScript
+    and Go (tree-sitter, scan-only exactly as the CLI reports them - the
+    scanner never instruments those files).
+
+    Prerequisite: the pywrit scanner must be installed in the same Python
+    environment as this server; TS/JS and Go parsing additionally needs
+    the polyglot extra:
+
+        pip install "pywrit[polyglot]"
+
+    Args:
+        path: Directory to scan (test files and vendored trees are skipped).
+        include_non_product: Also report writes under docs/, scripts/,
+            examples/, sandbox/, benchmark/, demo/, and build-tooling files.
+            Default False: they are counted under per-language "suppressed"
+            totals instead of becoming findings (never silently dropped).
+        max_findings: Findings list cap (default 25, minimum 1). When the
+            cap cuts the list, "findingsTruncated" carries the count left out.
+
+    Returns a summary: path, per-language files/sites/gated counts,
+    suppressed non-product totals by class, notScanned per language when
+    the polyglot extra is missing (files seen, none scanned), a verdict
+    line, and findings capped at max_findings: [{file (relative to the
+    scanned root), line, kind, function, class, verb, snippet}] sorted by
+    file then line. On error returns {error, status, detail}.
+    """
+    root = Path(path).expanduser().resolve()
+    if not root.exists():
+        return _fmt({"error": f"path does not exist: {path!r}",
+                     "status": 400, "detail": {"path": path}})
+    if not root.is_dir():
+        return _fmt({"error": f"not a directory: {path!r}",
+                     "status": 400, "detail": {"path": path}})
+    try:
+        from writ_cli import cli as wcli
+    except ImportError:
+        return _fmt({"error": "writ_scan needs the pywrit scanner installed "
+                              "in this Python environment.",
+                     "status": 0, "detail": {"install": _PYWRIT_INSTALL_CMD}})
+    try:
+        excludes = []
+        py_summary, py_findings, n_py_gated = _scan_python(wcli, root)
+        tsjs = wcli._tsjs_scan(root, excludes,
+                               include_non_product=include_non_product)
+        poly_findings = _scan_polyglot_findings(wcli, root, tsjs["sites"],
+                                                wcli._tsjs_verb)
+        go = wcli._go_scan(root, excludes,
+                           include_non_product=include_non_product)
+        poly_findings += _scan_polyglot_findings(wcli, root, go["sites"],
+                                                 wcli._go_verb)
+        languages = {"python": py_summary}
+        not_scanned = {}
+        for lang, key, res in (("tsjs", "TS/JS", tsjs), ("go", "Go", go)):
+            entry = {"files": len(res["files"]),
+                     "skipped": len(res["skipped"]),
+                     "sites": len(res["sites"]),
+                     "gated": sum(1 for s, _rid, fkey in res["sites"]
+                                  if (s.file,) + fkey in res["gated"]),
+                     "suppressed": _scan_suppressed(res)}
+            if res["missing_extra"]:
+                not_scanned[lang] = _scan_not_scanned(lang, key,
+                                                      len(res["files"]))
+            languages[lang] = entry
+        findings = sorted(py_findings + poly_findings,
+                          key=lambda f: (f["file"], f["line"]))
+        cap = max(1, max_findings)
+        py_sites = py_summary["sites"]
+        poly_sites = languages["tsjs"]["sites"] + languages["go"]["sites"]
+        total_sites = py_sites + poly_sites
+        total_gated = n_py_gated + languages["tsjs"]["gated"] + \
+            languages["go"]["gated"]
+        n_unscanned = sum(ns["filesSeen"] for ns in not_scanned.values())
+        # Verdict wording mirrors the CLI's score report: the bare zero
+        # verdict is qualified when files went unscanned or when the
+        # writes it found are polyglot-only.
+        if not py_sites:
+            if n_unscanned:
+                verdict = ("No write operations discovered in the files "
+                           "that were scanned.")
+            elif poly_sites:
+                verdict = "No Python write operations discovered."
+            else:
+                verdict = "No write operations discovered."
+        elif total_sites == total_gated:
+            verdict = (f"{total_sites} write operations discovered; "
+                       f"all {total_gated} gated")
+        else:
+            verdict = (f"{total_sites} write operations discovered, "
+                       f"{total_sites - total_gated} without a gate")
+        result = {
+            "path": str(root),
+            "languages": languages,
+            "notScanned": not_scanned,
+            "verdict": verdict,
+            "findings": findings[:cap],
+            "findingsTruncated": max(0, len(findings) - cap),
+        }
+        return _fmt(result)
+    except Exception as e:
+        return _fmt({"error": f"scan failed: {e}",
+                     "status": 0, "detail": {"exception": str(e)}})
+
+
+def _scan_python(wcli, root):
+    """Python tier: the stdlib ast scan scan_cmd runs. Returns
+    (summary, findings, gated_site_count)."""
+    files = wcli._collect_files(root, [])
+    sites, gated, skipped = [], set(), []
+    for p in files:
+        try:
+            src = p.read_text(encoding="utf-8")
+            tree = wcli._ast.parse(src)
+        except (UnicodeDecodeError, OSError, SyntaxError):
+            skipped.append(str(p))
+            continue
+        visitor = wcli._ScanVisitor(src, str(p))
+        visitor.visit(tree)
+        sites.extend(visitor.sites)
+        gated.update((str(p), n) for (n, _ln) in visitor.gated)
+    findings = [_scan_finding(wcli, root, s) for s in sites]
+    n_gated = sum(1 for s in sites if (s.file, s.func) in gated)
+    summary = {"files": len(files),
+               "skipped": len(skipped),
+               "sites": len(sites),
+               "gated": n_gated}
+    return summary, findings, n_gated
+
+
+def _scan_finding(wcli, root, site, verb_fn=None):
+    rel = Path(site.file).relative_to(root)
+    verb = (verb_fn or wcli.infer_verb)(rel, site.func, site.cls, site.kind)
+    return {"file": str(rel), "line": site.lineno, "kind": site.kind,
+            "function": site.func or "<module>", "class": site.cls or "",
+            "verb": verb, "snippet": _scan_snippet(site.snippet)}
+
+
+def _scan_polyglot_findings(wcli, root, sites, verb_fn):
+    return [_scan_finding(wcli, root, s, verb_fn=verb_fn)
+            for s, _rid, _fkey in sites]
+
+
+def _scan_suppressed(res):
+    """Per-class suppressed non-product site totals ({} when none)."""
+    suppressed = res.get("suppressed") or {}
+    return {cls: bucket["sites"] for cls, bucket in sorted(suppressed.items())}
 
 
 @mcp.tool()
