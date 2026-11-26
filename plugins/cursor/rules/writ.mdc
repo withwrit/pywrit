@@ -41,7 +41,7 @@ purpose are known.
 Every Writ decision creates a receipt in the hash-chained audit log. Do not
 claim that a write was authorized or recorded when the tool did not confirm it.
 
-The Writ server exposes 28 tools. Beyond the check-and-verify pair, use
+The Writ server exposes 29 tools. Beyond the check-and-verify pair, use
 `writ_receipts` and `writ_explain_receipt` to inspect decisions,
 `writ_verify_receipts` to prove the audit log's hash chain is intact,
 `writ_policy` / `writ_verbs` / `writ_principals` / `writ_keys` for tenant
@@ -50,8 +50,12 @@ read and set per-environment and per-principal policy overrides (each read
 returns the sparse override plus the effective policy and per-verb
 provenance; `inherit` removes a verb from a principal override), `writ_me`
 to see which tenant and key the configured API key is
-acting as (key email and plan, policy summary, monthly receipt usage), and
-`writ_tenant_invite` plus `writ_join_tenant` for the team
+acting as (key email and plan, policy summary, monthly receipt usage),
+`writ_scan` to scan a local directory for consequential writes (Python,
+TypeScript/JavaScript, and Go write sites, summarized with findings capped
+at `max_findings`; it runs the pywrit scanner locally with no gate call and
+no API key, and needs the pywrit scanner installed in the same Python
+environment), and `writ_tenant_invite` plus `writ_join_tenant` for the team
 invite flow: `writ_tenant_invite` mints (and rotates, invalidating the old
 one) the tenant's one live `writ_inv_...` code, and a teammate joins with
 `writ_join_tenant(email, invite_code)`, which issues their API key without

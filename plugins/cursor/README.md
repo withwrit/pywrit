@@ -110,7 +110,7 @@ patterns and coverage limitations.
 
 ## Writ MCP tools
 
-The server exposes 28 tools:
+The server exposes 29 tools:
 
 | Area | Tools |
 | --- | --- |
@@ -121,6 +121,7 @@ The server exposes 28 tools:
 | Demo | `writ_sandbox` |
 | GitHub App | `writ_github_installations`, `writ_github_set_threshold`, `writ_github_toggle_pr_comments` |
 | Repository manifests | `writ_manifests` |
+| Local scan | `writ_scan` |
 | Tenant settings | `writ_tenant_notify` |
 | Principals and verbs | `writ_principals`, `writ_verbs` |
 | Keys | `writ_keys` |
