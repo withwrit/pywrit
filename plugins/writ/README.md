@@ -2,7 +2,7 @@
 
 Writ is a policy gate and audit log for AI agent writes. Before a consequential write, the agent asks Writ with a sponsor, agent, verb, target, and purpose. Writ returns `ALLOW`, `DENY`, or `STEP_UP`, and every decision becomes a receipt in a hash-chained audit log.
 
-This plugin gives Claude Code the Writ MCP server, an enforce-before-write skill, and commands for checking one action and scanning a repository.
+This plugin gives Claude Code the Writ MCP server, an enforce-before-write skill, and commands for checking one action, scanning a repository, and inspecting receipts.
 
 ## Requirements
 
@@ -38,7 +38,7 @@ To install from a local checkout instead, use the absolute path to the repositor
 /plugin install writ@writ
 ```
 
-Then run `/reload-plugins` if the installation summary says a reload is needed. Confirm that `/writ:scan`, `/writ:check`, and the Writ MCP tools are available. The MCP server connects to the hosted Writ API at https://api.withwrit.com.
+Then run `/reload-plugins` if the installation summary says a reload is needed. Confirm that `/writ:scan`, `/writ:check`, `/writ:receipts`, and the Writ MCP tools are available. The MCP server connects to the hosted Writ API at https://api.withwrit.com.
 
 ## What is included
 
@@ -61,6 +61,10 @@ Coverage is Python scan plus auto-instrumentation, TypeScript and JavaScript sca
 ### `/writ:check`
 
 `commands/check.md` asks for any missing sponsor, agent, verb, target, or purpose, then runs one `writ_check` for the described action. It explains `ALLOW`, `DENY`, and `STEP_UP`, the audit log receipt, and the token verification needed before eventual execution after `ALLOW`. It does not perform the action.
+
+### `/writ:receipts`
+
+`commands/receipts.md` lists recent decisions with `writ_receipts`, explains one receipt by id with `writ_explain_receipt`, and verifies the audit-log hash chain with `writ_verify_receipts`. The argument is one of four forms: empty for the 10 latest receipts, a count from 1 to 50, a receipt id, or the word `verify`. The command reads the audit log only; it performs no write.
 
 ## Development
 

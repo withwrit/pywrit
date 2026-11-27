@@ -63,4 +63,4 @@ A scan is discovery, not a policy decision. Findings are heuristic and incomplet
 
 ## Related workflows
 
-Use `/writ:scan` to scan a repository and summarize risk. Use `/writ:check` to resolve the five inputs for one described action, call `writ_check`, and explain the outcome without executing the action.
+Use `/writ:scan` to scan a repository and summarize risk. Use `/writ:check` to resolve the five inputs for one described action, call `writ_check`, and explain the outcome without executing the action. Use `/writ:receipts` to list recent decisions, explain one receipt by id, or verify the audit-log hash chain.
