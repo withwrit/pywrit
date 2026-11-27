@@ -130,7 +130,7 @@ The server exposes 29 tools:
 | Team invites | `writ_tenant_invite`, `writ_join_tenant` |
 
 Sponsor operations require separate sponsor authorization. The Writ dashboard
-and the [MCP server documentation](https://docs.withwrit.com/mcp) provide the
+and the [MCP server documentation](https://docs.withwrit.com/mcp-server) provide the
 administrative setup. Agents do not need the sponsor credential for the normal
 check and verify loop or the sandbox.
 

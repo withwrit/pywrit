@@ -2,20 +2,20 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.withwrit/writ",
   "title": "writ",
-  "description": "Policy checks for AI agent writes (ALLOW/DENY/STEP_UP) with a tamper-evident audit log.",
+  "description": "Point-of-action policy checks for AI agent writes (ALLOW/DENY/STEP_UP) with a tamper-evident audit log.",
   "repository": {
     "url": "https://github.com/withwrit/pywrit",
     "source": "github",
     "subfolder": "mcp"
   },
-  "version": "0.2.5",
+  "version": "0.2.8",
   "websiteUrl": "https://withwrit.com",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "writ-mcp",
-      "version": "0.2.5",
+      "version": "0.2.8",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
